@@ -11,9 +11,9 @@ El diseño completo está en [`plan_etapa1.md`](plan_etapa1.md).
 
 | Etapa | Qué es | Estado |
 |---|---|---|
-| **1 · Pipeline offline** | Limpieza, features, Ridge y Kalman sobre CSV (fuente simulada F1). | ✅ Implementada |
-| **2 · Dashboard** | Señal cruda vs. limpia, parámetros ajustables y resultados de predicción. | ⏳ Pendiente |
-| **3 · Tiempo real** | Captura desde AC y predicción en ventana deslizante. | ⏳ Pendiente |
+| **1 · Pipeline offline** | Limpieza, features, Ridge y Kalman sobre CSV (fuente simulada F1). | Implementada |
+| **2 · Dashboard** | Señal cruda vs. limpia, parámetros ajustables y resultados de predicción. | Pendiente |
+| **3 · Tiempo real** | Captura desde AC y predicción en ventana deslizante. | Pendiente |
 
 La Etapa 1 ya está preparada para la 3: las features se calculan **por ventana**, el
 filtro es **causal** (guarda su estado) y los parámetros de escalado quedan en el modelo.
@@ -101,10 +101,10 @@ reportado**, no una condición de aprobación.
 
 | Fuente | Qué es | Desgaste real | Estado |
 |---|---|---|---|
-| **F1. Simulada** | `sim/generador.py` (código propio) | Sí, por construcción | ✅ usada en Etapa 1 |
-| **F2. Live Telemetry** | App de AC que guarda logs CSV por rueda | Sí (`Tire wear %`) | ⏳ Etapa 2 |
-| **F3. Logger propio** | Script Python sobre la memoria compartida de AC | No (solo proxy) | ⏳ Etapa 3 |
-| **F4. Datasets públicos** | Vueltas de AC en Hugging Face (parquet) | No | ⏳ pruebas de limpieza |
+| **F1. Simulada** | `sim/generador.py` (código propio) | Sí, por construcción | Usada en Etapa 1 |
+| **F2. Live Telemetry** | App de AC que guarda logs CSV por rueda | Sí (`Tire wear %`) | Etapa 2 |
+| **F3. Logger propio** | Script Python sobre la memoria compartida de AC | No (solo proxy) | Etapa 3 |
+| **F4. Datasets públicos** | Vueltas de AC en Hugging Face (parquet) | No | Pruebas de limpieza |
 
 En la Etapa 1 se usa **solo F1** (datos propios, sin licencia externa). F2–F4 se
 usarán en fases posteriores; hay que **revisar la licencia de cada dataset** antes de
