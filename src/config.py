@@ -65,11 +65,12 @@ def canales_filtrables() -> list[str]:
     return cols
 
 
-def _merge(base: dict, extra: dict) -> dict:
+def fusionar(base: dict, extra: dict) -> dict:
+    """Merge recursivo de ``extra`` sobre ``base`` (sin mutar ninguno)."""
     out = copy.deepcopy(base)
     for clave, valor in (extra or {}).items():
         if isinstance(valor, dict) and isinstance(out.get(clave), dict):
-            out[clave] = _merge(out[clave], valor)
+            out[clave] = fusionar(out[clave], valor)
         else:
             out[clave] = copy.deepcopy(valor)
     return out
@@ -81,5 +82,5 @@ def cargar_config(ruta: str | Path | None = None, overrides: dict | None = None)
     with open(ruta, "r", encoding="utf-8") as fh:
         cfg = yaml.safe_load(fh)
     if overrides:
-        cfg = _merge(cfg, overrides)
+        cfg = fusionar(cfg, overrides)
     return cfg

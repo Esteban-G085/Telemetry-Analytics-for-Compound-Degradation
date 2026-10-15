@@ -206,7 +206,6 @@ backend/
 │   ├── modelos.py        # Endpoints para inferencia y re-entrenamiento
 │   └── configuracion.py  # Carga, validación y exportación de config.yaml
 ├── ws/
-│   ├── gestor.py         # Gestor de conexiones WebSocket y eventos
 │   └── stream_telemetria.py # Transmisión continua / replay a 100 Hz
 └── servicios/
     ├── adaptador_pipeline.py # Envoltorio sobre src/ para llamadas sin I/O innecesario
@@ -450,3 +449,52 @@ Correcciones aplicadas **antes** de iniciar la implementación, con la mejor dec
 10. **§11 reordenado por prioridad:** Vistas 1, 3 y 4 primero (las que exige §12), 5/2/6 después.
 11. **Welch:** selector de `nperseg` con nota sobre $\Delta f$ (`nperseg = 128` → $\Delta f \approx 0.78$ Hz, ~6 bins en la banda baja).
 12. **README.md** pendiente de actualizar (tabla de hoja de ruta y estructura) — queda explícito en §11.7.
+
+### 13.1 Ajustes surgidos al implementar los pasos 1–2 (§11.1–11.2)
+
+Decisiones tomadas durante la implementación del backend, ya cubiertas por tests:
+
+1. **Endpoints añadidos** para cubrir criterios de la §12 que el §4 no listaba explícitamente:
+   `GET /api/telemetria/stint` (modo "stint completo" de la Vista 1, §3.1),
+   `POST /api/modelos/robustez` (slider de SNR de la Vista 5, §3.5) y
+   `DELETE /api/config` (botón "restablecer a fábrica", §3.4).
+2. **Diagnóstico de limpieza expuesto por `src/limpieza.py`:** `marcar_fuera_de_rango` y
+   `detectar_outliers` aceptan un `diagnostico` opcional que guarda las máscaras. El
+   endpoint de telemetría devuelve `valido`, `outliers` (índices) y `kpis.atenuacion_db`
+   **sin duplicar** la lógica del detector mediana/MAD (sección 3.1: marcadores de outliers).
+3. **Serialización con `orjson`** (respuesta propia `backend/respuestas.py`): con 45.000
+   muestras por vuelta, `json.dumps` costaba ~16 ms; orjson baja el endpoint a ~13 ms
+   (objetivo <20 ms). `NaN` → `null` y soporte de `numpy` integrados.
+4. **Protocolo binario del WS:** cabecera JSON (`canales`, `n_muestras`, `dtype`) seguida de
+   un `Float32Array` con forma `[n_canales, n_muestras]`. Se prefiere a la cabecera numérica
+   `[n_muestras, n_canales]` del §4 porque es autodescriptiva y no acopla el cliente al orden
+   de canales.
+5. **`/api/procesar` del diagrama §2 no se implementa:** su función la cubren
+   `POST /api/sesiones/cargar` (CSV de `data/raw/`) y `POST /api/sesiones/subir` (drag & drop).
+
+La latencia se mide contra un servidor `uvicorn` real (`tests/test_rendimiento.py`), no con
+el `TestClient` síncrono: REST ≈ 13 ms, Kalman por WS ≈ 3 ms, re-fit de Ridge por WS ≈ 16 ms.
+
+### 13.2 Revisión de minimalismo (v2.2) — cambios sobre lo planificado
+
+Pasada de "¿esto necesita existir?" sobre el backend ya implementado. Sin cambio de
+comportamiento (86 tests en verde):
+
+1. **Replay del WebSocket eliminado** (`replay_iniciar` / `replay_parar`, `_replay`, `_detener`
+   y su test). Sobre una sesión *grabada* el replay es del lado del cliente: el frontend ya
+   tiene las muestras en un `Float32Array` y reproduce avanzando un cursor. El streaming
+   servidor→cliente a 100 Hz solo tiene sentido cuando el dato **nace** en el servidor, es
+   decir, en la Etapa 3. Se retira de §3.6/§11.2 y se implementará allí.
+2. **`GET /api/modelos/predicciones` eliminado:** atajo fuera del §4; el frontend necesita
+   igualmente los dos `POST` (uno por slider), así que el endpoint y el helper `_ambos` sobran.
+3. **`backend/ws/gestor.py` eliminado** (`GestorConexiones`): mantenía una lista de conexiones
+   que nadie leía (no hay broadcast). `await websocket.accept()` directo.
+4. **`backend/servicios/saneado.py` eliminado:** redundante con `orjson` (ya el serializador
+   de las respuestas REST). Ahora hay **un solo camino de serialización** también en el WS
+   (`backend/respuestas.py::dumps`).
+5. **`decodificar_float32` movido a `tests/ayudas.py`** (solo lo usan los tests).
+6. **Eliminado `analisis.split_laps`** (código muerto) y el wrapper `columnas_fisicas`
+   (reenviaba a `src.config.canales_fisicos`).
+7. **`_fusionar` de `cache_memoria.py` unificado** con el merge de `src/config.py`
+   (renombrado a `src.config.fusionar`; antes era un duplicado exacto).
+8. **`empaquetar_float32` simplificado** a `np.asarray(matrices, dtype="<f4").tobytes()`.

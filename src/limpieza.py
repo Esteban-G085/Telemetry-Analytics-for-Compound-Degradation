@@ -115,10 +115,19 @@ def resamplear(
     return salida.reset_index(drop=True)
 
 
-def marcar_fuera_de_rango(df: pd.DataFrame, cfg: dict) -> tuple[pd.DataFrame, dict]:
+def marcar_fuera_de_rango(
+    df: pd.DataFrame, cfg: dict, diagnostico: dict | None = None
+) -> tuple[pd.DataFrame, dict]:
+    """Marca fuera de rango fisico.
+
+    Si se pasa ``diagnostico`` (dict) se guarda en
+    ``diagnostico["mascara_fuera_rango"]`` un dict ``columna -> mascara bool``.
+    Lo usa el backend de la Etapa 2 para dibujar que muestras se descartaron.
+    """
     df = df.copy()
     rangos = cfg["limpieza"]["rangos"]
     marcados = 0
+    mascaras: dict[str, np.ndarray] = {}
     for col in canales_fisicos():
         canal = col.split("_")[:-1] if col.endswith(tuple(f"_{w}" for w in RUEDAS)) else None
         if canal is not None:
@@ -131,19 +140,28 @@ def marcar_fuera_de_rango(df: pd.DataFrame, cfg: dict) -> tuple[pd.DataFrame, di
         x = df[col].to_numpy(dtype=float)
         fuera = (x < lo) | (x > hi)
         marcados += int(np.sum(fuera))
+        if diagnostico is not None:
+            mascaras[col] = fuera.copy()
         if fuera.any():
             x = x.copy()
             x[fuera] = np.nan
             df[col] = x
+    if diagnostico is not None:
+        diagnostico["mascara_fuera_rango"] = mascaras
     return df, {"fuera_de_rango": marcados}
 
 
-def detectar_outliers(df: pd.DataFrame, cfg: dict, fs: float) -> tuple[pd.DataFrame, dict]:
+def detectar_outliers(
+    df: pd.DataFrame, cfg: dict, fs: float, diagnostico: dict | None = None
+) -> tuple[pd.DataFrame, dict]:
     """Detecta outliers con mediana/MAD en ventana causal.
 
     Para no confundir cambios de nivel (recta <-> curva) con outliers, el
     umbral local tiene un piso: una fraccion de la dispersion robusta global
     del canal. Asi, en tramos quietos (MAD ~ 0) no se marca todo.
+
+    Si se pasa ``diagnostico`` (dict) se guarda en
+    ``diagnostico["mascara_outliers"]`` un dict ``columna -> mascara bool``.
     """
     df = df.copy()
     li = cfg["limpieza"]
@@ -152,6 +170,7 @@ def detectar_outliers(df: pd.DataFrame, cfg: dict, fs: float) -> tuple[pd.DataFr
     min_p = max(3, win // 4)
     piso = float(li.get("outlier_piso_sigma", 0.2))
     marcados = 0
+    mascaras: dict[str, np.ndarray] = {}
     for col in canales_fisicos():
         s = df[col]
         x = s.to_numpy(dtype=float)
@@ -168,10 +187,14 @@ def detectar_outliers(df: pd.DataFrame, cfg: dict, fs: float) -> tuple[pd.DataFr
         escala = np.maximum(1.4826 * mad, piso * sigma)
         fuera = ((s - med).abs() > umbral * escala) & med.notna()
         marcados += int(fuera.sum())
+        if diagnostico is not None:
+            mascaras[col] = fuera.to_numpy().copy()
         if fuera.any():
             x = x.copy()
             x[fuera.to_numpy()] = np.nan
             df[col] = x
+    if diagnostico is not None:
+        diagnostico["mascara_outliers"] = mascaras
     return df, {"outliers": marcados}
 
 
@@ -242,9 +265,9 @@ def preprocesar(
         intermedios["resampleado"] = df.copy()
 
     registro = {}
-    df, r = marcar_fuera_de_rango(df, cfg)
+    df, r = marcar_fuera_de_rango(df, cfg, diagnostico=intermedios)
     registro.update(r)
-    df, r = detectar_outliers(df, cfg, fs)
+    df, r = detectar_outliers(df, cfg, fs, diagnostico=intermedios)
     registro.update(r)
     df, r = interpolar_huecos(df, cfg, fs)
     registro.update(r)
