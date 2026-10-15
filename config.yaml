@@ -1,0 +1,73 @@
+# Configuracion del pipeline de la Etapa 1.
+# Las decisiones estan justificadas en plan_etapa1.md (seccion 1).
+
+fs: 100.0            # Hz, frecuencia objetivo de muestreo (D1)
+ventana_s: 2.0       # tamano de ventana de features (D2)
+hop_s: 1.0           # salto entre ventanas (D2)
+
+limpieza:
+  rangos:            # rangos fisicos; fuera de esto -> NaN
+    temp_core_c: [0.0, 250.0]
+    pressure_psi: [0.0, 60.0]
+    wheel_load_n: [-500.0, 25000.0]
+    wheel_slip: [-1.0, 1.5]
+    speed_kmh: [0.0, 400.0]
+  outlier_ventana_s: 0.5     # ventana causal para mediana/MAD
+  outlier_mad_umbral: 12.0
+  outlier_piso_sigma: 0.5    # piso del umbral (fraccion de la dispersion global)
+  hueco_max_s: 0.5           # huecos mas largos que esto no se interpolan
+  filtro:
+    orden: 4
+    corte_hz: 20.0           # D3: Butterworth orden 4, 20 Hz, causal (SOS)
+
+features:
+  temp_umbral_c: 90.0        # D4: grados-segundo por encima de este umbral
+  bandas_hz:
+    baja: [0.5, 5.0]
+    media: [5.0, 15.0]
+    alta: [15.0, 40.0]
+  welch_nperseg: 128
+  welch_noverlap: 64
+
+etiquetas:
+  k_fuel_s_kg: 0.035         # D7
+  calibrar_k_fuel: false     # estima k_fuel por regresion (cae al valor fijo si no aplica)
+  k_fuel_calib_vueltas: 3    # vueltas iniciales usadas para calibrar
+  ref_vueltas: [1, 2, 3]     # D8
+  savgol_ventana: 5
+  savgol_orden: 2
+  umbral_caida: 0.5          # D9
+
+modelo:
+  ridge_alphas: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 300.0, 1000.0]
+  ridge_clip: 6.0            # recorte de features estandarizadas (sigmas)
+  cv_bloques: 4
+  prop_test: 0.25
+  kalman:
+    q_nivel: 0.0001
+    q_pendiente: 0.00001
+    r: 0.001
+    monotono: true
+    sensibilidad_r: [0.0001, 0.001, 0.01, 0.1]   # para reportar sensibilidad
+
+evaluacion:
+  snr_db: [40.0, 30.0, 20.0, 10.0, 5.0, 0.0]
+  z: 1.96
+
+sim:
+  vueltas: 40                # D5
+  semilla: 42
+  fs_original: 333.0
+  jitter_s: 0.0002
+  combustible_inicial_kg: 105.0
+  combustible_kg_vuelta: 2.5 # D10
+  acople: 1.0                # fuerza del acoplamiento degradacion <-> slip/temp
+  tasa_degradacion: 1.0      # cuanto se acelera el desgaste al final (0=lineal, alto=caida marcada)
+  ruido:
+    slip: 0.01
+    temp: 1.5
+    pressure: 0.15
+    load: 60.0
+  outliers_prop: 0.002
+  huecos_prop: 0.001
+  hueco_largo_muestras: 40

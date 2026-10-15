@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Datos generados (artefactos grandes, se regeneran con `python main.py`)
+data/raw/*.csv
+data/processed/*.csv
+data/processed/*.csv.gz
+data/processed/*.joblib
+data/reports/*.html
+data/reports/**/*.html
+
+# Mantener la estructura de carpetas
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/reports/.gitkeep
