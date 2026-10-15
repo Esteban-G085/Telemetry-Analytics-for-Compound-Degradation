@@ -190,6 +190,3 @@ verdadera, casi sin ruido) y se reporta la sensibilidad a R en el HTML.
   enmascara la tendencia del combustible (pendiente con signo confundido). El proxy
   sigue funcionando porque ahora su mecanismo principal es la pérdida de agarre, no
   la monotonía del combustible. En datos reales (F2) la calibración debería activarse.
-- **Verificación física.** Con features tan correlacionadas los signos individuales no
-  son concluyentes; se reporta además la **suma de coeficientes por grupo** (más
-  robusta) como diagnóstico (ver arriba).
