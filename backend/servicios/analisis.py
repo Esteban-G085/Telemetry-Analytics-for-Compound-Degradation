@@ -28,6 +28,23 @@ def _prop_test(sesion: Sesion, prop_test: float | None) -> float:
     return float(prop_test if prop_test is not None else sesion.cfg["modelo"]["prop_test"])
 
 
+def _referencia(sesion: Sesion) -> dict:
+    """Series por vuelta de referencia para la Vista 3 (§3.3).
+
+    ``verdad`` es la degradacion real (F1/F2) o el proxy si no hay verdad
+    registrada; ``proxy`` es siempre el proxy de tiempos. Ambas ya estan
+    normalizadas en [0, 1] por `src.etiquetas`.
+    """
+    verdad = sesion.degradacion_vuelta()
+    proxy = sesion.proxy.set_index("lap")["degradacion_proxy"].sort_index()
+    return {
+        "verdad_laps": [int(l) for l in verdad.index],
+        "verdad": [float(v) for v in verdad.to_numpy()],
+        "proxy_laps": [int(l) for l in proxy.index],
+        "proxy": [float(v) for v in proxy.to_numpy()],
+    }
+
+
 # --------------------------------------------------------------------------
 # Ridge
 # --------------------------------------------------------------------------
@@ -77,6 +94,7 @@ def ridge_por_vuelta(
         "metricas": {k: float(v) for k, v in met.items()},
         "error_caida": evaluacion.error_vuelta_caida(true_te, pred_te, umbral),
         "importancias": modelo.importancias(ridge, cols).to_dict("records"),
+        **_referencia(sesion),
     }
 
 
@@ -122,6 +140,7 @@ def kalman_por_vuelta(
         "metricas": {k: float(v) for k, v in met.items()},
         "cobertura": evaluacion.cobertura_bandas(y_te, medias, var, z),
         "error_caida": evaluacion.error_vuelta_caida(y_te, medias, umbral),
+        **_referencia(sesion),
     }
 
 

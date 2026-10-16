@@ -105,6 +105,16 @@ def test_ridge_alpha_fijo(cliente):
     assert "coeficiente" in j["importancias"][0]
 
 
+def test_series_de_referencia(cliente):
+    """Ridge y Kalman exponen verdad y proxy por vuelta para la Vista 3 (§3.3)."""
+    for ruta in ("/api/modelos/ridge/ajustar", "/api/modelos/kalman/estimar"):
+        j = cliente.post(ruta, json={}).json()
+        assert len(j["verdad"]) == len(j["verdad_laps"]) > 0
+        assert len(j["proxy"]) == len(j["proxy_laps"]) > 0
+        assert all(0.0 <= v <= 1.0 for v in j["verdad"] if v == v)
+        assert all(0.0 <= v <= 1.0 for v in j["proxy"] if v == v)
+
+
 def test_ridge_ablacion(cliente):
     j = cliente.post(
         "/api/modelos/ridge/ajustar", json={"excluir": ["slip", "temp", "trabajo"]}

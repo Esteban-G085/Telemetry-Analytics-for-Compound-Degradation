@@ -1,0 +1,36 @@
+/* Tokens de diseño — "Dark Telemetry" (D8).
+   ponytail: sin fuentes externas; pila de sistema para que el .exe funcione sin red. */
+:root {
+  --bg: #0a0c10;
+  --bg-2: #0e1116;
+  --panel: #131820;
+  --panel-2: #19202b;
+  --border: #232b37;
+  --border-2: #2e3846;
+  --text: #e6ebf2;
+  --text-dim: #93a0b1;
+  --text-mute: #5d6a7b;
+  --accent: #22d3ee;
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --bad: #f43f5e;
+
+  /* color por magnitud */
+  --slip: #f59e0b;
+  --temp: #f43f5e;
+  --carga: #10b981;
+  --speed: #22d3ee;
+  --presion: #a78bfa;
+
+  /* color por rueda */
+  --w-fl: #38bdf8;
+  --w-fr: #f472b6;
+  --w-rl: #facc15;
+  --w-rr: #4ade80;
+
+  --radio: 10px;
+  --radio-sm: 7px;
+  --fuente: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --sombra: 0 8px 30px rgba(0, 0, 0, 0.35);
+}

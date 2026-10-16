@@ -17,7 +17,7 @@ El diseño está en [`plan_etapa1.md`](plan_etapa1.md) y
 | Etapa | Qué es | Estado |
 |---|---|---|
 | **1 · Pipeline offline** | Limpieza, features, Ridge y Kalman sobre CSV (fuente simulada F1). | Implementada |
-| **2 · Dashboard** | Backend REST + WebSocket que envuelve el pipeline; frontend uPlot y app de escritorio. | **Backend implementado y probado** (frontend y `.exe` pendientes) |
+| **2 · Dashboard** | Backend REST + WebSocket que envuelve el pipeline; frontend uPlot (6 vistas) y app de escritorio. | **Backend y frontend implementados y probados** (`.exe` pendiente) |
 | **3 · Tiempo real** | Captura desde AC y predicción en ventana deslizante. | Pendiente |
 
 La Etapa 1 ya está preparada para la 3: las features se calculan **por ventana**,
@@ -35,6 +35,9 @@ Probado con Python 3.11, numpy 2.x, scipy 1.15, pandas 3.x, scikit-learn 1.9 y
 FastAPI 0.143. El `requirements.txt` **fusiona** las dependencias de las dos
 etapas (no reemplaza las de la Etapa 1: `matplotlib` y `joblib` siguen siendo
 necesarias).
+
+El **frontend** solo necesita Node 18+ si vas a compilarlo (`cd frontend && npm install`);
+el resultado ya compilado (`frontend/dist/`) se sirve sin Node.
 
 ## Estructura
 
@@ -71,6 +74,19 @@ PROYECTO/
 │       ├── cache_memoria.py       # DataFrames procesados en RAM
 │       ├── analisis.py            # Ridge, Kalman, espectro, robustez
 │       └── serializacion.py       # numpy -> JSON/Float32
+├── frontend/                 # dashboard (Vite + uPlot, sin framework)
+│   ├── index.html            # shell: barra de sesión + pestañas + favicon inline
+│   ├── vite.config.js        # proxy /api, /health, /ws hacia el backend en dev
+│   └── src/
+│       ├── main.js           # shell: sesión, pestañas, WebSocket, enrutado
+│       ├── api.js            # cliente REST + CanalTelemetria (WS con reconexión)
+│       ├── sesion.js         # activar/recargar la sesión activa (compartido)
+│       ├── estado.js         # store mínimo con pub/sub
+│       ├── formato.js        # formateo de números/fechas
+│       ├── componentes/      # graficas.js (uPlot), degradacion.js, tabla_kpis.js
+│       ├── vistas/           # v_telemetria, v_espectro, v_prediccion,
+│       │                     # v_laboratorio, v_robustez, v_replay
+│       └── estilos/          # variables, layout, widgets, uplot_tema
 └── tests/                    # 86 tests
 ```
 
@@ -144,6 +160,68 @@ loop nunca se bloquee.
 > El **replay** no vive en el backend: sobre una sesión grabada el frontend ya tiene las muestras
 > en un `Float32Array` y reproduce avanzando un cursor. El streaming a 100 Hz se añadirá en la
 > Etapa 3, cuando el dato nazca en el servidor.
+
+## Uso — Etapa 2 (frontend)
+
+El dashboard es una app **Vite + [uPlot](https://github.com/leeoniya/uPlot)** sin
+framework (D8: objeto plano + pub/sub). En desarrollo habla con el backend por el
+proxy de Vite (rutas relativas `/api`, `/ws`):
+
+```bash
+cd frontend
+npm install
+npm run dev          # http://127.0.0.1:5173  (proxy -> backend en :8000)
+```
+
+Para producción, compila y deja que FastAPI sirva el resultado en `/`:
+
+```bash
+npm run build        # genera frontend/dist/ (lo monta backend/app.py)
+```
+
+### Las seis vistas
+
+| # | Vista | Qué muestra |
+|---|---|---|
+| 1 | **Telemetría** | Señal cruda vs. limpia de una vuelta, marcadores de outliers, huecos inválidos y KPIs de calidad. |
+| 2 | **Espectro** | PSD de Welch (crudo vs. limpio) con las bandas sombreadas y la atenuación por banda; planta 2×2 con la media por rueda. |
+| 3 | **Predicción** | Verdad/proxy, Ridge y Kalman por vuelta, bandas de confianza, líneas de caída y tabla de métricas. |
+| 4 | **Laboratorio** | Sliders de α/Q/R y ablación (reactivos por WebSocket) + limpieza y `k_fuel` (reprocesan la sesión); guardar / descargar / restablecer config. |
+| 5 | **Robustez** | MAE de Ridge frente a ruido inyectado (con cursor de SNR) e importancias con verificación de signo físico. |
+| 6 | **Replay** | Reproducción local del stint con ventana deslizante, control de velocidad y degradación estimada de la vuelta en curso. |
+
+> La **Vista 4** separa los controles en dos familias: los del **modelo** (Ridge α,
+> Kalman Q/R, monotonicidad, ablación) viajan por el WebSocket y recalculan la curva
+> sin recargar; los de **limpieza/features** (corte, MAD, grados·segundo, `k_fuel`)
+> se guardan como overrides y **reprocesan** el CSV (`POST /api/config` +
+> `POST /api/sesiones/cargar`), que es la operación lenta.
+
+### Trampa de uPlot: nunca llames a `redraw()` sin argumentos
+
+Todas las gráficas pasan por el envoltorio `Panel` de
+`frontend/src/componentes/graficas.js`. Ahí vive una trampa que dejó el dashboard
+**entero sin líneas** (se veían ejes y rejilla, pero ninguna serie) y conviene no
+reintroducir:
+
+- `uPlot.redraw()` **sin argumentos** ejecuta `_setScale("x", scales.x.min, scales.x.max)`.
+- Pero `uPlot.setScale()` **no aplica el rango de inmediato**: lo deja *pendiente* en
+  `pendScales` y lo aplica `setScales()` dentro del `_commit`, que corre en un microtask.
+- Los paneles se crean y se rellenan en el mismo tick (`new Panel(...)` → `datos()` →
+  `anotaciones()`). Cuando `anotaciones()` llama a `redraw()`, el auto-rango que acaba de
+  fijar `datos()` **aún no se ha aplicado**, así que `scales.x.min/max` siguen valiendo
+  `null`; `redraw()` reenvía ese `null` y **sobrescribe** el rango pendiente.
+- Resultado: escala X nula → `valToPos(x, "x")` devuelve `NaN` para todos los puntos →
+  el *path* de cada serie sale vacío → ejes sí, líneas no.
+
+Por eso `Panel.anotaciones()` llama a **`this.u.redraw(false)`**: repinta vía `commit()`
+(el hook `_anotar` se ejecuta igual) **sin tocar la escala X**. Regla práctica: para
+repintar anotaciones usa `redraw(false)` o `commit()`, **nunca `redraw()` a secas**.
+
+Cómo detectar un fallo así: **contar píxeles de serie** dentro del área de trazado
+(color saturado distinto de la rejilla). Mirar solo el tamaño del `<canvas>`, que exista
+`.uplot` o que no haya errores de consola **no demuestra que se dibuje nada**. En tests
+headless con Edge/Chrome, `document.hidden` es `true` y `requestAnimationFrame` no
+dispara; uPlot no usa `rAF` (dibuja por `queueMicrotask`), pero conviene recordarlo.
 
 ## Pruebas
 
@@ -269,15 +347,16 @@ verdadera, casi sin ruido) y se reporta la sensibilidad a R en el HTML.
 
 ## Pendiente de la Etapa 2
 
-El backend está completo y probado; falta la capa de interfaz y la distribución:
+El backend y el frontend están completos y probados; falta la distribución:
 
-- [ ] **Frontend** (`frontend/`, Vite + uPlot): Vistas 1 (telemetría cruda vs. limpia),
-      3 (predicción y bandas), 4 (laboratorio de parámetros), y luego 5, 2 y 6.
+- [x] **Backend** (`backend/`, FastAPI REST + WebSocket).
+- [x] **Frontend** (`frontend/`, Vite + uPlot): las **seis vistas** — 1 telemetría,
+      2 espectro, 3 predicción, 4 laboratorio, 5 robustez, 6 replay.
 - [ ] **App de escritorio** (`desktop.py` con pywebview) y scripts `.bat`.
 - [ ] **Empaquetado** a `.exe` (`TelemetryAnalytics.spec`) y validación a 60 FPS con 360k muestras.
-- [ ] **Replay** (Vista 6): el frontend lo reproduce en local sobre las muestras ya recibidas.
-      El streaming servidor→cliente a 100 Hz se implementará en la **Etapa 3**, cuando el dato
-      nazca en el servidor (captura en vivo).
+- [ ] **Streaming** servidor→cliente a 100 Hz (Vista 6 en vivo): será la **Etapa 3**,
+      cuando el dato nazca en el servidor. Hoy el replay reproduce en local sobre las
+      muestras ya recibidas por REST.
 
 ## Limitaciones conocidas
 
