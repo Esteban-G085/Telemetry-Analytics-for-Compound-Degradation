@@ -32,6 +32,17 @@ export function linea({ etiqueta, color: trazo, ancho = 1.6, dash, puntos = fals
   };
 }
 
+// Nube de puntos (sin trazo): para dispersiones.
+export function nube({ etiqueta, color: trazo }) {
+  return {
+    label: etiqueta,
+    stroke: trazo,
+    width: 0,
+    paths: () => null,
+    points: { show: true, size: 6, stroke: trazo, fill: trazo },
+  };
+}
+
 export class Panel {
   constructor(elemento, { series, altura = 240, sync = "telemetria", banda, ejeX, ejeY, escalaX, leyenda = true } = {}) {
     this.el = elemento;

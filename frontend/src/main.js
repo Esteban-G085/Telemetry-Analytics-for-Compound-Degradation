@@ -14,6 +14,7 @@ import * as vPrediccion from "./vistas/v_prediccion.js";
 import * as vLaboratorio from "./vistas/v_laboratorio.js";
 import * as vRobustez from "./vistas/v_robustez.js";
 import * as vReplay from "./vistas/v_replay.js";
+import * as vVivo from "./vistas/v_vivo.js";
 
 const VISTAS = [
   { id: "telemetria", num: "1", titulo: "Telemetría", modulo: vTelemetria },
@@ -22,6 +23,7 @@ const VISTAS = [
   { id: "laboratorio", num: "4", titulo: "Laboratorio", modulo: vLaboratorio },
   { id: "robustez", num: "5", titulo: "Robustez", modulo: vRobustez },
   { id: "replay", num: "6", titulo: "Replay", modulo: vReplay },
+  { id: "vivo", num: "7", titulo: "En vivo", modulo: vVivo },
 ];
 
 const ui = {

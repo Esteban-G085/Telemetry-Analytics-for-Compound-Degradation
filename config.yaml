@@ -54,6 +54,16 @@ evaluacion:
   snr_db: [40.0, 30.0, 20.0, 10.0, 5.0, 0.0]
   z: 1.96
 
+vivo:
+  fs_salida: 100.0           # Hz, frecuencia del bus tras decimar
+  fs_entrada: 333.0          # Hz aproximada de la memoria de AC (D4)
+  ventana_s: 6.0             # ventana del osciloscopio (segundos)
+  max_muestras: 12000        # tamano del buffer circular del bus
+  fps_ws: 10.0               # tramas por segundo hacia el frontend (D8)
+  anticipacion_vueltas: 3    # horizonte de prediccion en vivo
+  radio_memoria: "Local\\"   # prefijo de las secciones de AC
+  directorio: data/vivo      # donde deja el logger los CSV capturados
+
 sim:
   vueltas: 40                # D5
   semilla: 42

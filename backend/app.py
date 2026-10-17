@@ -13,20 +13,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.respuestas import RespuestaJSON
-from backend.routers import configuracion, modelos, sesiones, telemetria
+from backend.routers import configuracion, modelos, sesiones, telemetria, vivo
 from backend.servicios.cache_memoria import RAIZ, CacheMemoria
-from backend.ws import stream_telemetria
+from backend.servicios.vivo import VivoSesion
+from backend.ws import stream_telemetria, stream_vivo
 
 VERSION = "2.0.0"
 
 
-def crear_app(dir_raw: str | Path | None = None, overrides: dict | None = None) -> FastAPI:
+def crear_app(
+    dir_raw: str | Path | None = None,
+    overrides: dict | None = None,
+    dir_vivo: str | Path | None = None,
+) -> FastAPI:
     app = FastAPI(
         title="Telemetry Analytics API",
         version=VERSION,
         default_response_class=RespuestaJSON,  # orjson: serializa numpy, NaN->null
     )
     app.state.cache = CacheMemoria(dir_raw=dir_raw, overrides=overrides)
+    app.state.vivo = VivoSesion(app.state.cache, dir_vivo=dir_vivo)
 
     # CORS solo hace falta en desarrollo (Vite en otro puerto); en la app de
     # escritorio el frontend se sirve desde el mismo origen.
@@ -45,7 +51,9 @@ def crear_app(dir_raw: str | Path | None = None, overrides: dict | None = None) 
     app.include_router(telemetria.router)
     app.include_router(modelos.router)
     app.include_router(configuracion.router)
+    app.include_router(vivo.router)
     app.include_router(stream_telemetria.router)
+    app.include_router(stream_vivo.router)
 
     dist = RAIZ / "frontend" / "dist"
     if dist.exists():

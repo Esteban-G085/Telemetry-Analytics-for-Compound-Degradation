@@ -3,7 +3,7 @@
 
 import { api } from "../api.js";
 import { estado, suscribir } from "../estado.js";
-import { Panel, color, linea } from "../componentes/graficas.js";
+import { Panel, color, linea, nube } from "../componentes/graficas.js";
 import { pintarKpis, kpi } from "../componentes/tabla_kpis.js";
 import { num } from "../formato.js";
 
@@ -45,6 +45,16 @@ const PLANTILLA = `
       <h3>Planta 2×2 <span class="texto-dim mono">media de la vuelta · temperatura = color</span></h3>
       <div class="planta" id="v2-planta"></div>
     </section>
+    <section class="panel">
+      <h3>Dispersión de features <span class="texto-dim mono">por vuelta · §3.2</span></h3>
+      <div class="barra-controles">
+        <div class="grupo"><label>X</label><select class="input" id="v2-disp-x"></select></div>
+        <div class="grupo"><label>Y</label><select class="input" id="v2-disp-y"></select></div>
+        <div class="separador"></div>
+        <span class="nota" id="v2-disp-corr"></span>
+      </div>
+      <div class="grafica" id="v2-disp"></div>
+    </section>
   </div>
 `;
 
@@ -65,9 +75,15 @@ export function montar(contenedor) {
     kpis: q("#v2-kpis"),
     grafica: q("#v2-grafica"),
     planta: q("#v2-planta"),
+    dispX: q("#v2-disp-x"),
+    dispY: q("#v2-disp-y"),
+    dispCorr: q("#v2-disp-corr"),
+    disp: q("#v2-disp"),
   };
 
   let panel = null;
+  let panelDisp = null;
+  let featuresDisp = null;
   let sesionPrevia;
   let activo = true;
 
@@ -247,10 +263,62 @@ export function montar(contenedor) {
       .join("");
   }
 
+  // --- dispersión de features (§3.2) -----------------------------------
+  async function cargarFeatures() {
+    if (featuresDisp) return;
+    try {
+      const { features } = await api.features();
+      if (!activo) return;
+      featuresDisp = features ?? [];
+      const opciones = featuresDisp.map((f) => `<option value="${f}">${f}</option>`).join("");
+      const prevX = ui.dispX.value;
+      const prevY = ui.dispY.value;
+      ui.dispX.innerHTML = opciones;
+      ui.dispY.innerHTML = `<option value="degradacion">degradacion</option>` + opciones;
+      const porDefecto = featuresDisp.find((f) => f.startsWith("grados_segundo")) ?? featuresDisp[0] ?? "";
+      ui.dispX.value = featuresDisp.includes(prevX) ? prevX : porDefecto;
+      ui.dispY.value = prevY === "degradacion" || featuresDisp.includes(prevY) ? prevY : "degradacion";
+    } catch {
+      /* sin features: el panel queda vacío */
+    }
+  }
+
+  async function cargarDispersion() {
+    const x = ui.dispX.value;
+    if (!x) return;
+    try {
+      const d = await api.dispersion({ x, y: ui.dispY.value });
+      if (!activo) return;
+      const ajuste = d.recta ? d.px.map((v) => d.pendiente * v + d.intercepto) : null;
+      if (panelDisp) panelDisp.destruir();
+      panelDisp = new Panel(ui.disp, {
+        series: [
+          nube({ etiqueta: `vuelta (${d.n})`, color: color("--accent") }),
+          ...(ajuste ? [linea({ etiqueta: "ajuste", color: color("--warn"), ancho: 1.2, dash: [5, 3] })] : []),
+        ],
+        altura: 300,
+        sync: "dispersion",
+        ejeX: { label: d.x },
+        ejeY: { label: d.y },
+      });
+      panelDisp.datos([d.px, d.py, ...(ajuste ? [ajuste] : [])]);
+      ui.dispCorr.textContent =
+        d.corr == null
+          ? `${d.n} puntos · correlación no definida`
+          : `r = ${num(d.corr, 3)} · pendiente ${num(d.pendiente, 4)} · ${d.n} vueltas`;
+    } catch (error) {
+      if (!activo) return;
+      panelDisp?.destruir();
+      panelDisp = null;
+      ui.disp.innerHTML = `<div class="nota">No se pudo dibujar la dispersión: ${error.message}</div>`;
+    }
+  }
+
   // --- ciclo de vida ---------------------------------------------------
   function refrescar() {
     cargarEspectro();
     cargarPlanta();
+    cargarDispersion();
   }
 
   async function recargar() {
@@ -276,6 +344,7 @@ export function montar(contenedor) {
       laps.map((l) => `<option value="${l}">vuelta ${l}</option>`).join("");
     ui.lap.value = laps.some((l) => String(l) === lapPrevio) ? lapPrevio : lapPorDefecto();
 
+    await cargarFeatures();
     refrescar();
   }
 
@@ -284,10 +353,13 @@ export function montar(contenedor) {
   ui.lap.addEventListener("change", refrescar);
   ui.nperseg.addEventListener("change", cargarEspectro);
   ui.escala.addEventListener("change", cargarEspectro);
+  ui.dispX.addEventListener("change", cargarDispersion);
+  ui.dispY.addEventListener("change", cargarDispersion);
 
   const desuscribir = suscribir((e) => {
     if (e.sesionActiva === sesionPrevia) return;
     sesionPrevia = e.sesionActiva;
+    featuresDisp = null; // las features dependen de la sesión
     recargar();
   });
 
@@ -298,5 +370,6 @@ export function montar(contenedor) {
     activo = false;
     desuscribir();
     panel?.destruir();
+    panelDisp?.destruir();
   };
 }

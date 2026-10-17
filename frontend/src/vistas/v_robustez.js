@@ -30,6 +30,21 @@ function familiaDe(feature) {
   return FAMILIAS.find((f) => feature.startsWith(f.prefijo)) ?? { nombre: "otros", signo: null };
 }
 
+// Canales con una feature por rueda y canales globales (Vista 5, §3.5).
+const SENSORES_RUEDA = [
+  { canal: "wheel_slip", nombre: "deslizamiento" },
+  { canal: "temp_core_c", nombre: "temperatura" },
+  { canal: "wheel_load_n", nombre: "carga" },
+  { canal: "pressure_psi", nombre: "presión" },
+];
+const SENSORES_GLOBALES = [
+  { canal: "speed_kmh", nombre: "velocidad" },
+  { canal: "throttle", nombre: "acelerador" },
+  { canal: "brake", nombre: "freno" },
+  { canal: "steering", nombre: "dirección" },
+];
+const RUEDAS = ["fl", "fr", "rl", "rr"];
+
 const PLANTILLA = `
   <div class="aviso" id="v5-aviso">
     <strong>Sin sesión activa.</strong><br />Carga un CSV para evaluar la robustez.
@@ -56,6 +71,14 @@ const PLANTILLA = `
       </h3>
       <div class="importancias" id="v5-importancias"></div>
     </section>
+    <section class="panel">
+      <h3>Simulador de fallo de sensores <span class="texto-dim mono">Ridge sin el canal · §3.5</span></h3>
+      <div id="v5-sensores" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px 20px;margin:4px 0 10px"></div>
+      <div class="kpis" id="v5-sensores-kpis"></div>
+      <div class="nota" id="v5-sensores-nota">
+        Desconecta canales para ver el MAE de Ridge. Kalman suaviza la serie resultante.
+      </div>
+    </section>
   </div>
 `;
 
@@ -72,11 +95,15 @@ export function montar(contenedor) {
     grafica: q("#v5-grafica"),
     importancias: q("#v5-importancias"),
     agrupar: q("#v5-agrupar"),
+    sensores: q("#v5-sensores"),
+    sensoresKpis: q("#v5-sensores-kpis"),
+    sensoresNota: q("#v5-sensores-nota"),
   };
 
   let panel = null;
   let curva = null; // { snr_db, mae }
   let importancias = [];
+  let temporizadorSensores = null;
   let sesionPrevia;
   let activo = true;
 
@@ -163,6 +190,77 @@ export function montar(contenedor) {
       .join("");
   }
 
+  // --- simulador de fallo de sensores (§3.5) ---------------------------
+  function construirSensores() {
+    const caja = (canal, rueda, etiqueta) =>
+      `<label style="display:flex;gap:3px;align-items:center;font-size:11px;cursor:pointer" title="${canal}${rueda ? ` ${rueda}` : ""}">
+        <input type="checkbox" data-canal="${canal}"${rueda ? ` data-rueda="${rueda}"` : ""} />${etiqueta}
+      </label>`;
+    const filas = SENSORES_RUEDA.map(
+      (c) => `<div style="display:flex;gap:12px;align-items:center">
+        <span class="mono texto-dim" style="width:92px">${c.nombre}</span>
+        <span style="display:flex;gap:10px">${RUEDAS.map((r) => caja(c.canal, r, r.toUpperCase())).join("")}</span>
+      </div>`,
+    );
+    for (const c of SENSORES_GLOBALES) {
+      filas.push(`<div style="display:flex;gap:12px;align-items:center">
+        <span class="mono texto-dim" style="width:92px">${c.nombre}</span>
+        <span style="display:flex;gap:10px">${caja(c.canal, null, "caído")}</span>
+      </div>`);
+    }
+    ui.sensores.innerHTML = filas.join("");
+  }
+
+  function caidosActuales() {
+    return [...ui.sensores.querySelectorAll("input:checked")].map((el) => ({
+      canal: el.dataset.canal,
+      rueda: el.dataset.rueda || null,
+    }));
+  }
+
+  function pintarSensores(s) {
+    if (!s) {
+      pintarKpis(ui.sensoresKpis, []);
+      return;
+    }
+    const items = [
+      kpi("MAE base", num(s.mae_base, 4), { pie: `${s.n_features_base} features`, tono: "ok" }),
+      kpi("MAE con fallos", num(s.mae, 4), { pie: `${s.n_features} features`, tono: s.delta > 0 ? "bad" : "accent" }),
+      kpi("Δ MAE", `${s.delta >= 0 ? "+" : ""}${num(s.delta, 4)}`, {
+        pie: s.delta_rel == null ? "—" : `${s.delta_rel >= 0 ? "+" : ""}${num(s.delta_rel * 100, 1)} %`,
+        tono: s.delta > 0 ? "bad" : "ok",
+      }),
+      kpi("Canales caídos", String(s.caidos.length), { pie: `${s.columnas_quitadas.length} features fuera` }),
+    ];
+    if (s.mae_kalman_base != null && s.mae_kalman != null) {
+      items.push(kpi("Kalman base", num(s.mae_kalman_base, 4), { pie: "serie suavizada", tono: "ok" }));
+      items.push(
+        kpi("Kalman con fallos", num(s.mae_kalman, 4), { pie: "compensa el ruido", tono: "accent" }),
+      );
+    }
+    pintarKpis(ui.sensoresKpis, items);
+    ui.sensoresNota.textContent = s.columnas_quitadas.length
+      ? `Features fuera: ${s.columnas_quitadas.join(", ")}`
+      : "Ningún canal caído afecta al modelo (p. ej. la presión no alimenta features).";
+  }
+
+  async function actualizarSensores() {
+    if (!estado.sesionActiva) return;
+    try {
+      const s = await api.sensores({ caidos: caidosActuales() });
+      if (!activo) return;
+      pintarSensores(s);
+    } catch (error) {
+      if (!activo) return;
+      pintarKpis(ui.sensoresKpis, [kpi("Error", "—", { pie: error.message, tono: "bad" })]);
+    }
+  }
+
+  function programarSensores() {
+    clearTimeout(temporizadorSensores);
+    temporizadorSensores = setTimeout(actualizarSensores, 150);
+  }
+
   async function recargar() {
     if (!estado.sesionActiva) {
       ui.aviso.classList.remove("oculto");
@@ -183,6 +281,7 @@ export function montar(contenedor) {
       importancias = ridge.importancias ?? [];
       dibujarCurva();
       pintarImportancias();
+      actualizarSensores();
     } catch (error) {
       if (!activo) return;
       pintarKpis(ui.kpis, [kpi("Error", "—", { pie: error.message, tono: "bad" })]);
@@ -194,6 +293,7 @@ export function montar(contenedor) {
     if (curva) dibujarCurva();
   });
   ui.agrupar.addEventListener("change", pintarImportancias);
+  ui.sensores.addEventListener("change", programarSensores);
 
   const desuscribir = suscribir((e) => {
     if (e.sesionActiva === sesionPrevia) return;
@@ -205,10 +305,12 @@ export function montar(contenedor) {
 
   sesionPrevia = estado.sesionActiva;
   ui.snrValor.textContent = `${ui.snr.value} dB`;
+  construirSensores();
   recargar();
 
   return () => {
     activo = false;
+    clearTimeout(temporizadorSensores);
     desuscribir();
     panel?.destruir();
   };

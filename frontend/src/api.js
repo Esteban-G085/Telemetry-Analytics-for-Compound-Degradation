@@ -53,6 +53,20 @@ export const api = {
   kalman: (params) => pedir("/api/modelos/kalman/estimar", enviar(params)),
   ridge: (params) => pedir("/api/modelos/ridge/ajustar", enviar(params)),
   robustez: (params) => pedir("/api/modelos/robustez", enviar(params)),
+  sensores: (params) => pedir("/api/modelos/sensores", enviar(params)),
+  features: () => pedir("/api/modelos/features"),
+  dispersion: ({ x, y = "degradacion" } = {}) =>
+    pedir(`/api/modelos/dispersion${qs({ x, y })}`),
+  correlacion: ({ features } = {}) => pedir(`/api/modelos/correlacion${qs({ features })}`),
+
+  // --- Etapa 3: captura en vivo ---
+  vivoSesiones: () => pedir("/api/vivo/sesiones"),
+  vivoLayout: () => pedir("/api/vivo/layout"),
+  vivoEstado: () => pedir("/api/vivo/estado"),
+  vivoIniciar: ({ fuente = "ac", archivo, ritmoHz, bucle } = {}) =>
+    pedir("/api/vivo/iniciar", enviar({ fuente, archivo, ritmo_hz: ritmoHz ?? null, bucle: !!bucle })),
+  vivoDetener: () => pedir("/api/vivo/detener", enviar({})),
+  vivoVentana: ({ n, canales } = {}) => pedir(`/api/vivo/ventana${qs({ n, canales })}`),
 
   config: () => pedir("/api/config"),
   guardarConfig: (overrides) => pedir("/api/config", enviar(overrides)),
@@ -64,10 +78,11 @@ export const api = {
 // WebSocket de telemetría (D3). Reconexión con retroceso exponencial.
 // --------------------------------------------------------------------------
 export class CanalTelemetria {
-  constructor({ onMensaje, onBinario, onEstado } = {}) {
+  constructor({ onMensaje, onBinario, onEstado, ruta = "/ws/telemetria" } = {}) {
     this.onMensaje = onMensaje ?? (() => {});
     this.onBinario = onBinario ?? (() => {});
     this.onEstado = onEstado ?? (() => {});
+    this.ruta = ruta;
     this.socket = null;
     this.reintento = 0;
     this.cerrado = false;
@@ -76,7 +91,7 @@ export class CanalTelemetria {
 
   _url() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    return `${proto}://${location.host}/ws/telemetria`;
+    return `${proto}://${location.host}${this.ruta}`;
   }
 
   _conectar() {
@@ -120,6 +135,14 @@ export class CanalTelemetria {
   cerrar() {
     this.cerrado = true;
     this.socket?.close();
+  }
+}
+
+// Canal de captura en vivo (Etapa 3): mismas garantías de reconexión que el
+// de telemetría, pero apuntando al stream que el servidor empuja.
+export class CanalVivo extends CanalTelemetria {
+  constructor(opciones = {}) {
+    super({ ...opciones, ruta: "/api/vivo/stream" });
   }
 }
 
