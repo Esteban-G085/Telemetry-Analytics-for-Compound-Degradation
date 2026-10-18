@@ -373,7 +373,7 @@ alcance obligatorio de la Etapa 2 es F1 + drag & drop de CSV; F2 y F4 requieren 
 opcional. La Etapa 3 gira en torno a **F3**: el logger propio lee la memoria
 compartida de AC y deriva la degradación del `tyreWear` (grip) auto-calibrado
 contra su pico. Hay que **revisar la licencia de cada dataset** antes de publicar
-resultados (el dataset de Silverstone GP es MIT). Detalle en `plan_etapa1.md`, §2.
+resultados (el dataset de Silverstone GP es MIT). Detalle en `docs/plan_etapa1.md`, §2.
 
 ## Esquema de datos
 
