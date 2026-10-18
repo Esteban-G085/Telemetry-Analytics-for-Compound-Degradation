@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from src import evaluacion
+from telemetria.pipeline import evaluacion
 
 
 def test_metricas_prediccion_perfecta():
@@ -36,7 +36,7 @@ def test_baselines():
 
 
 def test_robustez_snr_empeora_con_ruido(cfg):
-    from src import modelo
+    from telemetria.pipeline import modelo
 
     rng = np.random.default_rng(0)
     X = rng.normal(size=(200, 4))

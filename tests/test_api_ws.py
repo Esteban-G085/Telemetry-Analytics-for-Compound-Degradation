@@ -64,7 +64,7 @@ def test_ws_sin_sesion_activa(datos_demo):
     """Sin sesion cargada el WS responde un error controlado, no un crash."""
     from fastapi.testclient import TestClient
 
-    from backend.app import crear_app
+    from telemetria.api.app import crear_app
 
     app = crear_app(dir_raw=datos_demo)
     with TestClient(app) as c:

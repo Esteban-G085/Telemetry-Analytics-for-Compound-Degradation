@@ -6,7 +6,7 @@ __pycache__/
 .venv/
 venv/
 
-# Datos generados (artefactos grandes, se regeneran con `python main.py`)
+# Datos generados (artefactos grandes, se regeneran con `python -m telemetria pipeline`)
 data/raw/*.csv
 data/processed/*.csv
 data/processed/*.csv.gz
@@ -14,11 +14,6 @@ data/processed/*.joblib
 data/reports/*.html
 data/reports/**/*.html
 data/vivo/*.csv
-
-# Empaquetado (PyInstaller)
-build/
-dist/
-*.spec.bak
 
 # Frontend (Node)
 frontend/node_modules/

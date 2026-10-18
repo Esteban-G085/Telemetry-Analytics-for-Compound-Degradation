@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sim.fuentes import BusTiempoReal, FuenteCSV, columnas_de
+from telemetria.adquisicion.fuentes import BusTiempoReal, FuenteCSV, columnas_de
 
 
 def _csv_en(tmp_path, n=1000, fs=333.0, lap_por=250):
@@ -53,7 +53,7 @@ def test_fuente_csv_decima_y_publica(tmp_path, cfg):
     # fs_original 333 -> fs_salida 100
     assert abs(len(salida) - 1000 * 100 / 333.0) <= 5
     # el esquema completo viaja en cada muestra
-    from src.config import columnas_esquema
+    from telemetria.pipeline.config import columnas_esquema
 
     assert all(c in salida[0] for c in columnas_esquema())
 

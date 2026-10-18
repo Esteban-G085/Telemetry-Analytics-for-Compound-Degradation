@@ -33,7 +33,7 @@ const PIPELINE = [
 const HUECO_MAX_S = 0.5;
 
 // Ablación física (D15): quita los grupos derivados de estas subcadenas.
-// Misma lista que main.py:148 (ablación por circularidad de la Etapa 1).
+// Misma lista que telemetria/pipeline/orquestador.py (ablación por circularidad de la Etapa 1).
 const ABLACION = ["slip", "temp", "psd", "grados_segundo", "trabajo"];
 
 function filaControl(p) {

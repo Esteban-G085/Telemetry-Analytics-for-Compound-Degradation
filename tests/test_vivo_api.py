@@ -13,7 +13,7 @@ def cliente_vivo(datos_demo, tmp_path_factory):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
-    from backend.app import crear_app
+    from telemetria.api.app import crear_app
 
     dir_vivo = tmp_path_factory.mktemp("vivo")
     app = crear_app(dir_raw=datos_demo, dir_vivo=dir_vivo)

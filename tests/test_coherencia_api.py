@@ -1,11 +1,11 @@
 """Tests de coherencia numérica: la API devuelve lo que produce la Etapa 1.
 
 Criterio de la sección 8 del plan Etapa 2: los resultados de Ridge y Kalman
-calculados por la API deben ser idénticos a los de `main.py`, con el slider de
+calculados por la API deben ser idénticos a los de `orquestador.py`, con el slider de
 alpha en su valor por defecto (elegido por CV) y los Q/R de `config.yaml`.
 
 La réplica del pipeline en `_pipeline_referencia` sigue paso a paso la
-orquestación de `main.py::correr`; si alguna se modifica, este test avisa.
+orquestación de `orquestador.py::correr`; si alguna se modifica, este test avisa.
 """
 
 from __future__ import annotations
@@ -16,15 +16,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src import etiquetas, evaluacion, features, limpieza, modelo
-from src.config import cargar_config
+from telemetria.pipeline import etiquetas, evaluacion, features, limpieza, modelo
+from telemetria.pipeline.config import cargar_config
 from tests.conftest import OVERRIDES
 
 RAIZ = Path(__file__).resolve().parents[1]
 
 
 def _pipeline_referencia(ruta_csv: Path, ruta_verdad: Path | None, cfg: dict) -> dict:
-    """Répica de `main.py::correr` sobre un CSV ya escrito en disco."""
+    """Répica de `orquestador.py::correr` sobre un CSV ya escrito en disco."""
     df_raw = pd.read_csv(ruta_csv)
     df_limpio, _registro, _estado = limpieza.preprocesar(df_raw, cfg)
     feats = features.features_por_ventanas(df_limpio, cfg)
@@ -41,7 +41,7 @@ def _pipeline_referencia(ruta_csv: Path, ruta_verdad: Path | None, cfg: dict) ->
         mapa = dict(zip(proxy["lap"], proxy["degradacion_proxy"]))
         y_ventana = feats["lap"].map(mapa).to_numpy(dtype=float)
 
-    # split temporal (nunca al azar), igual que main.py
+    # split temporal (nunca al azar), igual que orquestador.py
     laps_w = feats["lap"].to_numpy()
     train_laps, test_laps = modelo.split_temporal(np.unique(laps_w), cfg["modelo"]["prop_test"])
     m_tr = np.isin(laps_w, train_laps)
@@ -80,7 +80,7 @@ def _pipeline_referencia(ruta_csv: Path, ruta_verdad: Path | None, cfg: dict) ->
 
 
 def test_api_reproduce_el_pipeline_de_etapa_1(cliente, datos_demo):
-    """Ridge y Kalman de la API == los de main.py (alpha por CV, Q/R de config)."""
+    """Ridge y Kalman de la API == los de orquestador.py (alpha por CV, Q/R de config)."""
     cfg = cargar_config(overrides=OVERRIDES)
     ref = _pipeline_referencia(
         datos_demo / "demo.csv", datos_demo / "demo_verdad.csv", cfg
@@ -144,7 +144,7 @@ def cliente_sim42():
 
     from fastapi.testclient import TestClient
 
-    from backend.app import crear_app
+    from telemetria.api.app import crear_app
 
     app = crear_app()  # config.yaml real, sin overrides
     with TestClient(app) as c:

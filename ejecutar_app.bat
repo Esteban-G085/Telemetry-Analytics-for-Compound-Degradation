@@ -1,8 +1,8 @@
 @echo off
-rem Arranca la app de escritorio (Etapa 3). Doble clic o: ejecutar_app.bat --modo seco
+rem Arranca la app local (Etapa 3). Doble clic o: ejecutar_app.bat --modo seco
 cd /d "%~dp0"
 if exist ".venv\Scripts\python.exe" (
-  ".venv\Scripts\python.exe" desktop.py %*
+  ".venv\Scripts\python.exe" -m telemetria app %*
 ) else (
-  python desktop.py %*
+  python -m telemetria app %*
 )

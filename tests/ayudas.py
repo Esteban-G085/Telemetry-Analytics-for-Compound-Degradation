@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.config import RUEDAS, columnas_esquema
+from telemetria.pipeline.config import RUEDAS, columnas_esquema
 
 
 def df_esquema(n: int, fs: float = 100.0, lap: int = 1) -> pd.DataFrame:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from sim.acondicionador import AcondicionadorCausal
+from telemetria.adquisicion.acondicionador import AcondicionadorCausal
 
 
 def _decimar(ac: AcondicionadorCausal, x: np.ndarray) -> list[float]:

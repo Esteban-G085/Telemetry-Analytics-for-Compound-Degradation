@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from sim import generador
-from src.config import columnas_esquema
+from telemetria.adquisicion import generador
+from telemetria.pipeline.config import columnas_esquema
 
 
 def test_columnas_del_esquema(cfg):
@@ -74,7 +74,7 @@ def test_menos_agarre_por_degradacion_alarga_la_vuelta():
 def test_tiempo_de_vuelta_crece_con_el_desgaste(cfg):
     """En el dataset completo el tiempo de vuelta debe subir con la degradacion."""
     df_raw, verdad = generador.generar_dataframe(cfg, semilla=3)
-    df, _, _ = __import__("src.limpieza", fromlist=["preprocesar"]).preprocesar(df_raw, cfg)
+    df, _, _ = __import__("telemetria.pipeline.limpieza", fromlist=["preprocesar"]).preprocesar(df_raw, cfg)
     t_vuelta = df.groupby("lap")["timestamp_s"].apply(lambda s: s.max() - s.min())
     d_vuelta = verdad.groupby("lap")["degradacion"].mean()
     # correlacion positiva entre duracion de la vuelta y desgaste

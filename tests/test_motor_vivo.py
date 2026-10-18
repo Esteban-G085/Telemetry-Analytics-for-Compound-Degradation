@@ -5,9 +5,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from sim.fuentes import BusTiempoReal
-from sim.motor_vivo import LoggerVivo, MotorVivo
-from src.config import columnas_esquema
+from telemetria.adquisicion.fuentes import BusTiempoReal
+from telemetria.adquisicion.motor_vivo import LoggerVivo, MotorVivo
+from telemetria.pipeline.config import columnas_esquema
 
 RUEDAS = ("fl", "fr", "rl", "rr")
 

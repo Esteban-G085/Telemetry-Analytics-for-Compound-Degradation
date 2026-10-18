@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.config import cargar_config
+from telemetria.pipeline.config import cargar_config
 
 # Configuracion pequena para que los tests corran rapido.
 OVERRIDES = {
@@ -30,7 +30,7 @@ def base_cfg():
 @pytest.fixture(scope="module")
 def datos_demo(tmp_path_factory):
     """Genera un CSV pequeno (6 vueltas) con su verdad en una carpeta temporal."""
-    from sim import generador
+    from telemetria.adquisicion import generador
 
     cfg = cargar_config(overrides=OVERRIDES)
     dir_raw = tmp_path_factory.mktemp("raw")
@@ -46,7 +46,7 @@ def cliente(datos_demo):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
-    from backend.app import crear_app
+    from telemetria.api.app import crear_app
 
     app = crear_app(dir_raw=datos_demo, overrides=OVERRIDES)
     with TestClient(app) as c:

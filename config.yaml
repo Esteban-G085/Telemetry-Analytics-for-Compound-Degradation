@@ -1,5 +1,5 @@
 # Configuracion del pipeline de la Etapa 1.
-# Las decisiones estan justificadas en plan_etapa1.md (seccion 1).
+# Las decisiones estan justificadas en docs/plan_etapa1.md (seccion 1).
 
 fs: 100.0            # Hz, frecuencia objetivo de muestreo (D1)
 ventana_s: 2.0       # tamano de ventana de features (D2)

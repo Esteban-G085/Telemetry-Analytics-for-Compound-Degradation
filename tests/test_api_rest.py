@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import yaml
 
-from src.config import cargar_config
+from telemetria.pipeline.config import cargar_config
 
 
 def test_health(cliente):

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src import limpieza
+from telemetria.pipeline import limpieza
 from tests.ayudas import df_esquema
 
 
@@ -125,7 +125,7 @@ def test_no_interpola_a_traves_de_la_frontera_de_vuelta(cfg):
 
 
 def test_preprocesar_reduce_outliers(cfg):
-    from sim import generador
+    from telemetria.adquisicion import generador
 
     df_raw, _ = generador.generar_dataframe(cfg)
     df, registro, estado = limpieza.preprocesar(df_raw, cfg)

@@ -32,7 +32,7 @@ async def _medir(datos_demo) -> dict:
     import uvicorn
     import websockets
 
-    from backend.app import crear_app
+    from telemetria.api.app import crear_app
     from tests.ayudas import decodificar_float32
 
     puerto = _puerto_libre()

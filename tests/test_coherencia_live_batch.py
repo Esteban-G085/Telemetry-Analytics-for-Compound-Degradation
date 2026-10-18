@@ -13,10 +13,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sim import generador
-from sim.fuentes import BusTiempoReal, FuenteCSV
-from src import limpieza
-from src.config import cargar_config
+from telemetria.adquisicion import generador
+from telemetria.adquisicion.fuentes import BusTiempoReal, FuenteCSV
+from telemetria.pipeline import limpieza
+from telemetria.pipeline.config import cargar_config
 
 # Descartamos el primer segundo (transitorio del filtro con estado inicial 0).
 DESCARTE_S = 1.0

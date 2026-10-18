@@ -6,7 +6,7 @@ import ctypes
 
 import pytest
 
-from sim.ac_info import (
+from telemetria.adquisicion.ac_info import (
     SPageFileGraphics,
     SPageFilePhysics,
     MemoriaAC,
