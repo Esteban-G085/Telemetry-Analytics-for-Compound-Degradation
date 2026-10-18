@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from src import etiquetas
+from telemetria.pipeline import etiquetas
 from tests.ayudas import df_degradacion
 
 

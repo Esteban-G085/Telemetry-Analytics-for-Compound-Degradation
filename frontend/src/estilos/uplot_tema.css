@@ -1,0 +1,47 @@
+/* Tema oscuro para uPlot (leyenda, ejes, cursor). */
+
+.uplot {
+  font-family: var(--fuente);
+}
+
+.u-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.u-legend {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.u-legend .u-marker {
+  border-radius: 2px;
+}
+
+.u-legend th {
+  font-weight: 500;
+}
+
+.u-legend .u-label {
+  color: var(--text-mute);
+}
+
+.u-legend .u-value {
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.u-cursor-x,
+.u-cursor-y {
+  border-color: rgba(148, 163, 184, 0.35) !important;
+}
+
+.u-select {
+  background: rgba(34, 211, 238, 0.12);
+}
+
+.u-axis {
+  color: var(--text-mute);
+}

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b1620'/%3E%3Cpath d='M6 24 L13 18.5 L18 21.5 L26 9.5' fill='none' stroke='%2322d3ee' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='26' cy='9.5' r='2.6' fill='%23fbbf24'/%3E%3C/svg%3E"
+    />
+    <title>Telemetry Analytics · Compound Degradation</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="marca">
+          <span class="logo" aria-hidden="true"></span>
+          <div>
+            <h1>Telemetry Analytics</h1>
+            <span class="sub">Compound Degradation · Assetto Corsa</span>
+          </div>
+        </div>
+        <div class="controles-sesion">
+          <select id="sel-sesion" class="input" aria-label="Sesión"></select>
+          <label class="btn ghost" for="archivo">Subir CSV</label>
+          <input id="archivo" type="file" accept=".csv" hidden />
+          <span id="estado-sesion" class="pill">sin sesión</span>
+        </div>
+      </header>
+      <nav class="tabs" id="tabs" aria-label="Vistas"></nav>
+      <main id="vista" class="vista"></main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

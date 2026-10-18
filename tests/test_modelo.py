@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from src import modelo
+from telemetria.pipeline import modelo
 
 
 def test_split_temporal_sin_fuga(cfg):
@@ -57,7 +57,7 @@ def test_kalman_monotono(cfg):
 
 
 def test_kalman_cobertura_de_bandas(cfg):
-    from src.evaluacion import cobertura_bandas
+    from telemetria.pipeline.evaluacion import cobertura_bandas
 
     k = cfg["modelo"]["kalman"]
     kal = modelo.KalmanDegradacion(k["q_nivel"], k["q_pendiente"], k["r"])

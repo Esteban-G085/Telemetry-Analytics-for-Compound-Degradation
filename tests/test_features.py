@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from src import features
+from telemetria.pipeline import features
 from tests.ayudas import df_esquema
 
 

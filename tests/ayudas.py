@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.config import RUEDAS, columnas_esquema
+from telemetria.pipeline.config import RUEDAS, columnas_esquema
 
 
 def df_esquema(n: int, fs: float = 100.0, lap: int = 1) -> pd.DataFrame:
@@ -49,3 +49,11 @@ def df_degradacion(degrad, fuel, k_fuel: float = 0.035, base_s: float = 90.0, fs
     df["lap"] = np.concatenate(laps)
     df["fuel_kg"] = np.concatenate(fuels)
     return df
+
+
+def decodificar_float32(datos: bytes, n_canales: int) -> np.ndarray:
+    """Inverso de la trama binaria del WS (`empaquetar_float32`)."""
+    a = np.frombuffer(datos, dtype="<f4")
+    if n_canales <= 0 or a.size % n_canales:
+        raise ValueError("Tamano de trama incompatible con n_canales")
+    return a.reshape(n_canales, a.size // n_canales)

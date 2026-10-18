@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from sim import generador
-from src import etiquetas, evaluacion, features, limpieza, modelo
+from telemetria.adquisicion import generador
+from telemetria.pipeline import etiquetas, evaluacion, features, limpieza, modelo
 
 
 def test_pipeline_de_punta_a_punta(cfg):

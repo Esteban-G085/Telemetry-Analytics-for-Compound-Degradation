@@ -1,6 +1,6 @@
 """Tests del reporte HTML (trazabilidad y tablas)."""
 
-from src import reporte
+from telemetria.pipeline import reporte
 
 
 def _datos_minimos():
