@@ -75,4 +75,16 @@ describe("montaje de las vistas", () => {
     if (typeof limpiar === "function") limpiar();
     contenedor.remove();
   });
+
+  it("la vista En vivo incluye el osciloscopio y el panel de acelerador/freno", () => {
+    const contenedor = document.createElement("div");
+    document.body.appendChild(contenedor);
+
+    const limpiar = vVivo.montar(contenedor);
+    expect(contenedor.querySelector("#v7-osciloscopio")).not.toBeNull();
+    expect(contenedor.querySelector("#v7-pedales")).not.toBeNull();
+
+    if (typeof limpiar === "function") limpiar();
+    contenedor.remove();
+  });
 });

@@ -53,6 +53,37 @@ def test_outlier_se_marca_y_no_contamina():
     assert np.nanmax(np.abs(salida[401:])) < 1.0
 
 
+def test_piso_sigma_evita_marcar_cambios_reales_de_nivel():
+    """Sin el piso, un tramo casi plano colapsa el MAD local y marca como outlier
+    el cambio de nivel real (huecos falsos en el osciloscopio). El piso (fraccion
+    de la dispersion global), igual que en el batch, lo evita pero conserva los
+    picos absurdos.
+    """
+    fs = 100.0
+    rng = np.random.default_rng(4)
+    n = 3000
+    x = np.empty(n)
+    # Tramo con variabilidad realista: fija la dispersion global del canal.
+    x[:1500] = 0.05 * np.sin(2 * np.pi * 1.0 * np.arange(1500) / fs)
+    # "Recta": plano con micro-ruido y, despues, un cambio de nivel real.
+    x[1500:2000] = 0.07 + rng.normal(0.0, 1e-5, 500)
+    x[2000:] = 0.05 + rng.normal(0.0, 1e-5, 1000)
+    x[2500] = 5.0  # pico realmente absurdo
+
+    base = dict(ventana_outlier_s=0.5, mad_umbral=12.0)
+    ac_sin = AcondicionadorCausal(fs, fs, 20.0, canales=("x",), piso_sigma=0.0, **base)
+    ac_con = AcondicionadorCausal(fs, fs, 20.0, canales=("x",), piso_sigma=0.5, **base)
+    y_sin = np.array(_decimar(ac_sin, x))
+    y_con = np.array(_decimar(ac_con, x))
+
+    # Sin piso: el cambio de nivel se marca como si fuera un pico (racha de NaN).
+    assert np.isnan(y_sin[2000:2030]).sum() > 5
+    # Con piso: el cambio de nivel ya no se marca...
+    assert np.isnan(y_con[2000:2030]).sum() == 0
+    # ...pero el pico absurdo si se sigue detectando.
+    assert np.isnan(y_con[2500])
+
+
 def test_huecos_nan_se_propagan():
     ac = AcondicionadorCausal(100.0, 100.0, 20.0, canales=("x",))
     salida = _decimar(ac, np.array([0.0, 1.0, np.nan, np.nan, 1.0, 0.0]))

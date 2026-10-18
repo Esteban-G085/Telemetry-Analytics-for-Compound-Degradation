@@ -41,6 +41,8 @@ class AcondicionadorCausal:
         canales_outlier: tuple[str, ...] | None = None,
         ventana_outlier_s: float = 0.5,
         mad_umbral: float = 12.0,
+        piso_sigma: float = 0.0,
+        ventana_global_s: float = 30.0,
         cada_outlier: int = 8,
         filtro: bool = True,
     ):
@@ -87,6 +89,19 @@ class AcondicionadorCausal:
         self.dt = 1.0 / self.fs_entrada
         self.periodo_salida = 1.0 / self.fs_salida
 
+        # Piso del umbral: una fraccion de la dispersion robusta **global** del
+        # canal, igual que `limpieza.detectar_outliers` (D14). Sin el, en tramos de
+        # senal casi constante el MAD local tiende a 0, el umbral se colapsa y todo
+        # el tramo se marca como outlier -> rachas de NaN -> huecos en el
+        # osciloscopio. La ventana global es larga (~30 s) para que el piso sea
+        # estable aunque el tramo actual sea plano.
+        self._piso_sigma = float(piso_sigma)
+        self._ventana_global = max(5, int(round(float(ventana_global_s) * self.fs_entrada)))
+        self._min_global = max(10, min(self._ventana_global, int(round(0.5 * self.fs_entrada))))
+        self._cada_global = max(self._cada_outlier, int(round(0.25 * self.fs_entrada)))
+        self._hist_global = {c: deque(maxlen=self._ventana_global) for c in self.canales_outlier}
+        self._sigma_global = {c: float("nan") for c in self.canales_outlier}
+
     # --- filtrado (IIR directo, forma II traspuesta) ---
     def _filtrar(self, canal: str, x: float) -> float:
         if not self.filtro or self.sos is None:
@@ -101,28 +116,42 @@ class AcondicionadorCausal:
         return x
 
     # --- outliers ---
-    def _actualizar_stats(self, canal: str) -> None:
+    def _actualizar_stats(self, canal: str, recalcular_global: bool = False) -> None:
         h = self._hist[canal]
-        if len(h) < self._min_out:
-            return
-        arr = np.fromiter(h, dtype=float, count=len(h))
-        med = float(np.median(arr))
-        mad = float(np.median(np.abs(arr - med)))
-        self._out_med[canal] = med
-        self._out_esc[canal] = 1.4826 * mad
+        if len(h) >= self._min_out:
+            arr = np.fromiter(h, dtype=float, count=len(h))
+            med = float(np.median(arr))
+            mad = float(np.median(np.abs(arr - med)))
+            self._out_med[canal] = med
+            self._out_esc[canal] = 1.4826 * mad
+        if recalcular_global and self._piso_sigma > 0.0:
+            g = self._hist_global[canal]
+            if len(g) >= self._min_global:
+                arr = np.fromiter(g, dtype=float, count=len(g))
+                centro = float(np.median(arr))
+                self._sigma_global[canal] = 1.4826 * float(np.median(np.abs(arr - centro)))
 
     def _es_outlier(self, canal: str) -> bool:
         med = self._out_med.get(canal, float("nan"))
         esc = self._out_esc.get(canal, float("nan"))
         if not np.isfinite(med) or not np.isfinite(esc) or esc <= 0.0:
             return False
+        escala = esc
+        if self._piso_sigma > 0.0:
+            sigma = self._sigma_global.get(canal, float("nan"))
+            # Sin referencia global todavia: no marcar (evita falsos positivos al
+            # arrancar, cuando solo hay un tramo corto y el MAD local es fragil).
+            if not np.isfinite(sigma) or sigma <= 0.0:
+                return False
+            escala = max(esc, self._piso_sigma * sigma)
         x = self._hist[canal][-1]
-        return abs(x - med) > self._mad_umbral * esc
+        return abs(x - med) > self._mad_umbral * escala
 
     def procesar(self, fila: dict) -> dict | None:
         """Filtra y decima una muestra cruda. ``None`` si aun no toca emitir."""
         self._contador += 1
         recalcular = (self._contador % self._cada_outlier) == 0
+        recalcular_global = (self._contador % self._cada_global) == 0
 
         salida: dict = {}
         for c in self.canales:
@@ -134,8 +163,10 @@ class AcondicionadorCausal:
 
             if c in self._hist:
                 self._hist[c].append(x)
+                if self._piso_sigma > 0.0:
+                    self._hist_global[c].append(x)
                 if recalcular or not np.isfinite(self._out_med[c]):
-                    self._actualizar_stats(c)
+                    self._actualizar_stats(c, recalcular_global)
                 if self._es_outlier(c):
                     x = self._ultimo[c]  # hold: no contamina el filtro
                     salida[c] = float("nan")

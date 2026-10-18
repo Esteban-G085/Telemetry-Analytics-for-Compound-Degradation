@@ -65,6 +65,10 @@ const PLANTILLA = `
       <h3>Osciloscopio <span class="texto-dim mono">ventana deslizante · 6 s</span></h3>
       <div class="grafica" id="v7-osciloscopio"></div>
     </section>
+    <section class="panel">
+      <h3>Acelerador / Freno <span class="texto-dim mono">pedales · %</span></h3>
+      <div class="grafica" id="v7-pedales"></div>
+    </section>
   </div>
 
   <div class="rejilla lab">
@@ -104,6 +108,7 @@ export function montar(contenedor) {
     rueda: q("#v7-rueda"),
     csv: q("#v7-csv"),
     osc: q("#v7-osciloscopio"),
+    pedales: q("#v7-pedales"),
     espectro: q("#v7-espectro"),
     planta: q("#v7-planta"),
     plantaNota: q("#v7-planta-nota"),
@@ -112,6 +117,7 @@ export function montar(contenedor) {
 
   let activo = true;
   let panelOsc = null;
+  let panelPed = null;
   let panelEsp = null;
   let canalWs = null;
   let ultimo = null;
@@ -142,11 +148,23 @@ export function montar(contenedor) {
   function crearPaneles() {
     if (!panelOsc) {
       panelOsc = new Panel(ui.osc, {
-        series: [linea({ etiqueta: magnitud().nombre, color: color("--accent"), ancho: 1.6 })],
+        series: [linea({ etiqueta: magnitud().nombre, color: color("--accent"), ancho: 1.6, puentes: true })],
         altura: 260,
         sync: "vivo",
         ejeX: { label: "s" },
         ejeY: { label: magnitud().unidad || "—" },
+      });
+    }
+    if (!panelPed) {
+      panelPed = new Panel(ui.pedales, {
+        series: [
+          linea({ etiqueta: "Acelerador", color: color("--ok"), ancho: 1.6, puentes: true }),
+          linea({ etiqueta: "Freno", color: color("--bad"), ancho: 1.6, puentes: true }),
+        ],
+        altura: 260,
+        sync: "vivo",
+        ejeX: { label: "s" },
+        ejeY: { label: "%" },
       });
     }
     if (!panelEsp) {
@@ -188,6 +206,10 @@ export function montar(contenedor) {
     panelOsc.datos([vent.t ?? [], serie]);
     panelOsc.el.parentElement.querySelector("h3").innerHTML =
       `Osciloscopio <span class="texto-dim mono">${m.nombre}${m.sinRueda ? "" : ` · ${ui.rueda.value.toUpperCase()}`}</span>`;
+
+    // pedales: AC entrega acelerador/freno en 0..1 -> los pasamos a %.
+    const aPct = (arr) => (arr ?? []).map((v) => (v == null ? null : v * 100));
+    panelPed.datos([vent.t ?? [], aPct(vent.series?.throttle), aPct(vent.series?.brake)]);
 
     // espectro
     const esp = msg.espectro;
@@ -275,7 +297,8 @@ export function montar(contenedor) {
 
   // --- WebSocket ---
   function ajustes() {
-    return { canales: [canalActual()], n: N_VENTANA };
+    const canales = Array.from(new Set([canalActual(), "throttle", "brake"]));
+    return { canales, n: N_VENTANA };
   }
 
   function conectarWS() {
@@ -355,6 +378,7 @@ export function montar(contenedor) {
     activo = false;
     canalWs?.cerrar();
     panelOsc?.destruir();
+    panelPed?.destruir();
     panelEsp?.destruir();
   };
 }

@@ -20,13 +20,16 @@ function grupoSync(clave) {
   return gruposSync.get(clave);
 }
 
-// Definición de una línea de datos.
-export function linea({ etiqueta, color: trazo, ancho = 1.6, dash, puntos = false, formateador }) {
+// Definición de una línea de datos. `puentes` conecta a través de huecos (null)
+// en vez de cortar el trazo: útil en monitores en vivo, donde un NaN puntual no
+// debe partir la línea.
+export function linea({ etiqueta, color: trazo, ancho = 1.6, dash, puntos = false, formateador, puentes = false }) {
   return {
     label: etiqueta,
     stroke: trazo,
     width: ancho,
     dash,
+    spanGaps: puentes,
     points: { show: puntos, size: 5, stroke: trazo, fill: trazo },
     ...(formateador ? { value: (_u, valor) => formateador(valor) } : {}),
   };

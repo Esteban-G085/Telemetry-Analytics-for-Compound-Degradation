@@ -15,6 +15,7 @@ limpieza:
   outlier_ventana_s: 0.5     # ventana causal para mediana/MAD
   outlier_mad_umbral: 12.0
   outlier_piso_sigma: 0.5    # piso del umbral (fraccion de la dispersion global)
+  outlier_global_s: 30.0     # ventana de la dispersion robusta global (piso, D14)
   hueco_max_s: 0.5           # huecos mas largos que esto no se interpolan
   filtro:
     orden: 4

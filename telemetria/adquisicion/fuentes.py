@@ -113,6 +113,8 @@ class Fuente(threading.Thread):
             orden=int(self.cfg["limpieza"]["filtro"]["orden"]),
             ventana_outlier_s=float(self.cfg["limpieza"]["outlier_ventana_s"]),
             mad_umbral=float(self.cfg["limpieza"]["outlier_mad_umbral"]),
+            piso_sigma=float(self.cfg["limpieza"].get("outlier_piso_sigma", 0.5)),
+            ventana_global_s=float(self.cfg["limpieza"].get("outlier_global_s", 30.0)),
         )
 
     def _emitir(self, fila: dict) -> None:
