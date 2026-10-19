@@ -141,6 +141,28 @@ class KalmanDegradacion:
         self.I = np.eye(2)
         self.monotono = monotono
 
+    def paso(self, x: np.ndarray, P: np.ndarray, obs: float, r: float | None = None,
+             nivel_prev: float | None = None) -> tuple[np.ndarray, np.ndarray]:
+        """Una iteracion predictor-corrector (permite Kalman incremental, B5).
+
+        ``r`` permite dar a una observacion concreta un ruido distinto al global
+        (por ejemplo la vuelta en curso, que es una media parcial ruidosa, B4).
+        ``nivel_prev`` reproduce el clamp monotono entre iteraciones.
+        """
+        R = self.R if r is None else np.array([[float(r)]])
+        x = self.F @ x
+        P = self.F @ P @ self.F.T + self.Q
+        S = self.H @ P @ self.H.T + R
+        K = P @ self.H.T @ np.linalg.inv(S)
+        x = x + (K @ (np.array([[obs]]) - self.H @ x)).ravel()
+        P = (self.I - K @ self.H) @ P
+        if self.monotono:
+            if nivel_prev is not None and x[0] < nivel_prev:
+                x[0] = nivel_prev
+            if x[1] < 0.0:
+                x[1] = 0.0
+        return x, P
+
     def filtrar(self, observaciones) -> dict:
         obs = np.asarray(observaciones, dtype=float)
         n = len(obs)
@@ -150,17 +172,7 @@ class KalmanDegradacion:
         pendiente = np.zeros(n)
         var_nivel = np.zeros(n)
         for k in range(n):
-            x = self.F @ x
-            P = self.F @ P @ self.F.T + self.Q
-            S = self.H @ P @ self.H.T + self.R
-            K = P @ self.H.T @ np.linalg.inv(S)
-            x = x + (K @ (np.array([[obs[k]]]) - self.H @ x)).ravel()
-            P = (self.I - K @ self.H) @ P
-            if self.monotono:
-                if k > 0 and x[0] < nivel[k - 1]:
-                    x[0] = nivel[k - 1]
-                if x[1] < 0.0:
-                    x[1] = 0.0
+            x, P = self.paso(x, P, float(obs[k]), nivel_prev=(nivel[k - 1] if k > 0 else None))
             nivel[k] = x[0]
             pendiente[k] = x[1]
             var_nivel[k] = P[0, 0]

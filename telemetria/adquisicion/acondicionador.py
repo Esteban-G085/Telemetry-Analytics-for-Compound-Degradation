@@ -23,7 +23,7 @@ from __future__ import annotations
 from collections import deque
 
 import numpy as np
-from scipy.signal import butter
+from scipy.signal import butter, sosfilt_zi
 
 from telemetria.pipeline.config import canales_filtrables, canales_fisicos
 
@@ -70,9 +70,13 @@ class AcondicionadorCausal:
                 int(orden), self.corte_hz / (self.fs_entrada / 2.0), btype="low", output="sos"
             )
             self.sos = np.asarray(self.sos, dtype=float)
-            self._z = {c: np.zeros((self.sos.shape[0], 2)) for c in self.canales_filtro}
+            self._zi_base = sosfilt_zi(self.sos)
+            # Estado por canal: se inicializa con la primera muestra (evita el
+            # transitorio desde cero; B7).
+            self._z: dict[str, np.ndarray | None] = {c: None for c in self.canales_filtro}
         else:
             self.sos = None
+            self._zi_base = None
             self._z = {}
 
         # Estado del detector de outliers y de la decimacion.
@@ -86,6 +90,7 @@ class AcondicionadorCausal:
         self._contador = 0
         self._ultimo = {c: 0.0 for c in self.canales}  # zero-order hold
         self._t_acum = 0.0
+        self._t_prev: float | None = None  # ultimo timestamp_s crudo visto
         self.dt = 1.0 / self.fs_entrada
         self.periodo_salida = 1.0 / self.fs_salida
 
@@ -107,6 +112,11 @@ class AcondicionadorCausal:
         if not self.filtro or self.sos is None:
             return x
         z = self._z[canal]
+        if z is None:
+            # Arranque sin transitorio: estado inicial sosteniendo la primera
+            # muestra (B7).
+            z = self._zi_base * float(x)
+            self._z[canal] = z
         for i in range(self.sos.shape[0]):
             b0, b1, b2, _a0, a1, a2 = self.sos[i]
             y = b0 * x + z[i, 0]
@@ -188,8 +198,21 @@ class AcondicionadorCausal:
             if clave not in salida:
                 salida[clave] = valor
 
-        # decimacion por acumulador temporal
-        self._t_acum += self.dt
+        # decimacion por acumulador temporal con timestamps reales (A2): se
+        # acumula el dt observado (respetando el jitter), con el dt nominal como
+        # respaldo si la fila no trae timestamp valido.
+        t = fila.get("timestamp_s")
+        dt = self.dt
+        if t is not None:
+            try:
+                t = float(t)
+            except (TypeError, ValueError):
+                t = None
+        if t is not None and np.isfinite(t):
+            if self._t_prev is not None and t > self._t_prev:
+                dt = t - self._t_prev
+            self._t_prev = t
+        self._t_acum += dt
         if self._t_acum + 1e-9 < self.periodo_salida:
             return None
         self._t_acum -= self.periodo_salida

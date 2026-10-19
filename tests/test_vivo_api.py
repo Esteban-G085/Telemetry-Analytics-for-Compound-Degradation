@@ -83,6 +83,42 @@ def test_archivo_inexistente(cliente_vivo):
     assert r.status_code == 404
 
 
+def test_archivo_invalido_no_detiene_la_sesion(cliente_vivo):
+    """Un archivo invalido no debe tumbar la captura en curso (B6)."""
+    c, _ = cliente_vivo
+    c.post("/api/vivo/iniciar", json={"fuente": "seco", "archivo": "demo.csv"})  # tiempo real
+    _esperar_muestras(c)
+    r = c.post("/api/vivo/iniciar", json={"fuente": "seco", "archivo": "no_existe.csv"})
+    assert r.status_code == 404
+    estado = c.get("/api/vivo/estado").json()
+    assert estado["activo"] is True  # la sesion previa sigue viva
+    c.post("/api/vivo/detener")
+
+
+def test_estado_incluye_diagnostico(cliente_vivo):
+    """El estado reporta paquetes perdidos y fallos de suscriptores (B2/B3)."""
+    c, _ = cliente_vivo
+    c.post("/api/vivo/iniciar", json={"fuente": "seco", "archivo": "demo.csv", "ritmo_hz": 0})
+    estado = _esperar_muestras(c)
+    assert "paquetes_perdidos" in estado
+    assert "errores_subs" in estado
+    assert estado["paquetes_perdidos"] == 0  # el modo seco no tiene packetId real
+
+
+def test_detener_bajo_carga(cliente_vivo):
+    """Detener mientras la fuente produce rapido cierra limpio y sin errores (C)."""
+    c, dir_vivo = cliente_vivo
+    c.post("/api/vivo/iniciar", json={"fuente": "seco", "archivo": "demo.csv", "ritmo_hz": 0})
+    _esperar_muestras(c)
+    estado = c.post("/api/vivo/detener").json()
+    assert estado["activo"] is False
+    assert not estado.get("error")
+    assert estado["errores_subs"] == 0
+    # el CSV quedo completo y legible
+    sesiones = c.get("/api/vivo/sesiones").json()["sesiones"]
+    assert any(s["nombre"].startswith("demo_") for s in sesiones)
+
+
 def test_layout_reporta_sin_ac(cliente_vivo):
     c, _ = cliente_vivo
     j = c.get("/api/vivo/layout").json()

@@ -198,16 +198,25 @@ dato real (mismo acondicionador causal), garantizando la coherencia con el batch
 
 Flujo: `Fuente` (memoria de AC o CSV) → `BusTiempoReal` → `AcondicionadorCausal`
 (outliers causales + IIR SOS 20 Hz + decimación a 100 Hz) → `MotorVivo` (features
-en ventana deslizante + Ridge + Kalman) → `LoggerVivo` (CSV con el esquema del
-proyecto + `<nombre>_verdad.csv` si la fuente trae verdad) → WebSocket a ~10 Hz.
+en ventana deslizante + Kalman; **Ridge no interviene en vivo**) → `LoggerVivo`
+(CSV **crudo**, antes del acondicionador, con el esquema del proyecto + columnas
+extra `packetId`, `grip_*` y `degradacion`, y `<nombre>_verdad.csv` si hay
+etiqueta) → WebSocket a ~10 Hz.
+
+Robustez operativa: los suscriptores del bus y de la fuente se aíslan con
+`try/except` (un fallo no tumba la captura), `FuenteVivo` cuenta los `packetId`
+**salteados** y mide la frecuencia real de captura, el CSV se crea **perezosamente**
+en el primer registro (una fuente que no arranca no deja un archivo vacío) y
+`POST /api/vivo/iniciar` no responde "activo" hasta confirmar que la fuente preparó
+bien.
 
 ### Endpoints REST
 
 | Método y ruta | Para qué |
 |---|---|
-| `POST /api/vivo/iniciar` | Arranca la captura (`fuente`: `ac` o `seco`; `archivo`, `ritmo_hz`, `bucle`). |
+| `POST /api/vivo/iniciar` | Arranca la captura (`fuente`: `ac` o `seco`; `archivo`, `ritmo_hz`, `bucle`). `ritmo_hz` es un **interruptor**: `0` = máxima velocidad, ausente/`>0` = tiempo real según los timestamps del CSV. |
 | `POST /api/vivo/detener` | Detiene la captura y cierra el CSV. |
-| `GET /api/vivo/estado` | Estado del motor: muestras, vuelta, grip, degradación, predicción, ruta del CSV. |
+| `GET /api/vivo/estado` | Estado del motor (muestras, vuelta, grip, degradación, predicción, ruta del CSV) + diagnóstico de captura (`paquetes_perdidos`, `fs_medida`, `errores_subs`). |
 | `GET /api/vivo/ventana` | Ventana deslizante para el osciloscopio (`canales`, `n`). |
 | `GET /api/vivo/sesiones` | Capturas guardadas en `data/vivo/`. |
 | `GET /api/vivo/layout` | Diagnóstico de la memoria compartida (¿está AC publicando?). |
@@ -215,9 +224,10 @@ proyecto + `<nombre>_verdad.csv` si la fuente trae verdad) → WebSocket a ~10 H
 ### WebSocket `/api/vivo/stream`
 
 El servidor empuja una trama JSON cada ~100 ms con `tipo: "vivo"`: `n`, `lap`,
-`grip.<rueda>`, `degradacion.<rueda>`, `degradacion_modo`, `prediccion`, la
-`ventana` (t + series) y el `espectro` de la ventana. El cliente puede enviar
-`{"canales": [...], "n": 600}` para elegir qué ventana recibe y `{"tipo": "ping"}`.
+`grip.<rueda>`, `degradacion.<rueda>`, `degradacion_modo`, `prediccion` (agregada +
+`por_rueda`), la `ventana` (t + series) y el `espectro` de la ventana. El cliente
+puede enviar `{"canales": [...], "n": 200}` para elegir qué ventana recibe y
+`{"tipo": "ping"}`.
 
 ### App local (navegador)
 
@@ -320,11 +330,11 @@ python -m pytest -q
 | `tests/test_ac_info.py` | Offsets/tamaños de los structs de AC y el camino «AC no está publicando». |
 | `tests/test_acondicionador.py` | Decimación a la frecuencia objetivo, atenuación del filtro y outliers causales. |
 | `tests/test_fuentes.py` | `BusTiempoReal` y `FuenteCSV` (decimación, esquema y verdad inyectada). |
-| `tests/test_motor_vivo.py` | Degradación desde grip auto-calibrado, predicción Kalman y logger CSV. |
-| `tests/test_vivo_api.py` | Endpoints `/api/vivo/*` y el WebSocket `/api/vivo/stream`. |
-| `tests/test_coherencia_live_batch.py` | **D14**: la ruta en vivo (outliers causales + filtro + decimación) reproduce la señal del pipeline batch con correlación > 0.97. |
+| `tests/test_motor_vivo.py` | Degradación desde grip auto-calibrado, predicción Kalman (agregada y **por rueda**) y logger CSV. |
+| `tests/test_vivo_api.py` | Endpoints `/api/vivo/*` y el WebSocket `/api/vivo/stream` (incluye detener bajo carga). |
+| `tests/test_coherencia_live_batch.py` | **D14**: la ruta en vivo (outliers causales + filtro + decimación) reproduce la señal del pipeline batch con correlación > 0.97. Incluye el reprocesado del **CSV crudo** del logger en batch (logger → batch, A1/C/D4). |
 
-Y **8 tests del frontend** con [Vitest](https://vitest.dev/) + jsdom (`cd frontend && npm test`):
+Y **9 tests del frontend** con [Vitest](https://vitest.dev/) + jsdom (`cd frontend && npm test`):
 
 | Fichero | Qué cubre |
 |---|---|
@@ -345,6 +355,10 @@ re-fit de Ridge por WS ≈ 16 ms.
 | `modelo.kalman.*` | Q/R fijos del filtro (`monotono: true` impone no-decrecimiento) |
 | `limpieza.filtro.corte_hz` | corte del Butterworth causal |
 | `features.welch_nperseg` | resolución del PSD de Welch (`128` → Δf ≈ 0.78 Hz a 100 Hz) |
+
+> **Nota (B8):** la banda «alta» (15–40 Hz) cae en la zona de transición del
+> Butterworth a 20 Hz. Su potencia depende de `corte_hz`, así que no conviene cambiar
+> el corte sin reinterpretar esa banda (ni al revés).
 
 Los sliders del dashboard se inicializan con estos valores y `DELETE /api/config` los restablece.
 
@@ -436,7 +450,10 @@ El Kalman lineal queda por detrás de Ridge porque la degradación simulada se a
 al final del stint (curva de caída no lineal); aun así se mantiene en ~0.02 subiendo
 `q_pendiente` (1e-5) para que la pendiente siga esa aceleración. La cobertura de las
 bandas al 95 % da 1.00 (bandas conservadoras: la observación es la degradación
-verdadera, casi sin ruido) y se reporta la sensibilidad a R en el HTML.
+verdadera, casi sin ruido) y se reporta la sensibilidad a R en el HTML. Ese 1.00 no
+debe leerse como logro: con la etiqueta simulada casi sin ruido las bandas no se
+ponen a prueba. En pista conviene **calibrar `R` con el error del proxy** (MAE 0.027)
+para que reflejen incertidumbre real.
 
 ## Pendiente de la Etapa 2
 

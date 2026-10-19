@@ -28,7 +28,7 @@ const MAGNITUDES = [
   { id: "speed_kmh", nombre: "Velocidad", unidad: "km/h", sinRueda: true },
 ];
 
-const N_VENTANA = 600; // 6 s a 100 Hz
+const N_VENTANA = 200; // 2 s a 100 Hz (misma ventana que las features)
 
 const PLANTILLA = `
   <div class="barra-controles">
@@ -62,7 +62,7 @@ const PLANTILLA = `
 
   <div class="rejilla">
     <section class="panel">
-      <h3>Osciloscopio <span class="texto-dim mono">ventana deslizante · 6 s</span></h3>
+      <h3>Osciloscopio <span class="texto-dim mono">ventana deslizante · 2 s</span></h3>
       <div class="grafica" id="v7-osciloscopio"></div>
     </section>
     <section class="panel">
@@ -272,11 +272,28 @@ export function montar(contenedor) {
           `<td class="mono texto-dim">${lo == null ? "—" : `${num(lo, 3)} … ${num(hi, 3)}`}</td></tr>`,
       );
     });
+    // Predicción por rueda (B4): la rueda que más se degrada no queda enmascarada
+    // por la media de las cuatro.
+    const por = pred.por_rueda ?? {};
+    const finales = RUEDAS.map((r) => {
+      const m = por[r.id]?.media;
+      return m && m.length ? { nombre: r.nombre, valor: m[m.length - 1] } : null;
+    }).filter(Boolean);
+    let pieRueda = "";
+    if (finales.length === RUEDAS.length) {
+      const peor = finales.reduce((a, b) => (b.valor > a.valor ? b : a));
+      pieRueda =
+        `<div class="nota">Predicción final por rueda: ` +
+        finales
+          .map((f) => `${f.nombre} ${num(f.valor, 3)}${f === peor ? " ⚠" : ""}`)
+          .join(" · ") +
+        `</div>`;
+    }
     ui.prediccion.innerHTML = `
       <table class="tabla">
         <thead><tr><th>Vuelta</th><th>Degradación</th><th>Intervalo</th></tr></thead>
         <tbody>${filas.join("")}</tbody>
-      </table>`;
+      </table>${pieRueda}`;
   }
 
   function colorDegradacion(d) {

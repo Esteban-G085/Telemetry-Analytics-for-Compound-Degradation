@@ -53,33 +53,50 @@ class VivoSesion:
         fuente = (fuente or "ac").lower()
         if fuente not in FUENTES:
             raise ValueError(f"fuente desconocida: {fuente} (usa {FUENTES})")
+        # Resolver el archivo ANTES de tocar la sesion en curso (B6): un CSV
+        # invalido no debe detener la captura que ya estaba corriendo.
+        ruta = self._resolver_archivo(archivo) if fuente == "seco" else None
         with self._lock:
-            self._detener_sin_lock()
             cfg = self.config()
             v = cfg.get("vivo", {})
-            self.bus = BusTiempoReal(int(v.get("max_muestras", 12000)))
-            self.fuente_nombre = fuente
-            self.archivo = archivo
-            self.error = None
-
+            bus = BusTiempoReal(int(v.get("max_muestras", 12000)))
+            motor = MotorVivo(cfg, bus, fuente=fuente)
             if fuente == "seco":
-                ruta = self._resolver_archivo(archivo)
-                self.motor = MotorVivo(cfg, self.bus, fuente="seco")
-                self.fuente = FuenteCSV(ruta, self.bus, cfg, ritmo_hz=ritmo_hz, bucle=bucle)
+                nueva = FuenteCSV(ruta, bus, cfg, ritmo_hz=ritmo_hz, bucle=bucle)
                 base = ruta.stem
             else:
-                self.motor = MotorVivo(cfg, self.bus, fuente="ac")
-                self.fuente = FuenteVivo(self.bus, cfg)
+                nueva = FuenteVivo(bus, cfg)
                 base = "ac"
 
             nombre = f"{base}_{time.strftime('%Y%m%d_%H%M%S')}"
-            self.logger = LoggerVivo(self.dir_vivo, nombre)
-            self.bus.suscribir(self.logger.registrar)
-            self.ruta_csv = str(self.logger.ruta)
+            logger = LoggerVivo(self.dir_vivo, nombre)
+            # CSV crudo: se suscribe a la fuente antes del acondicionador (A1/D7).
+            nueva.suscribir_crudo(logger.registrar)
+            if fuente == "ac":
+                # En AC la verdad se deriva del grip en el motor (A5).
+                motor.logger = logger
+
+            # Recien ahora se detiene la sesion anterior y se publica la nueva.
+            self._detener_sin_lock()
+            self.bus = bus
+            self.motor = motor
+            self.fuente = nueva
+            self.logger = logger
+            self.fuente_nombre = fuente
+            self.archivo = archivo
+            self.ruta_csv = str(logger.ruta)
             self.iniciada_en = time.time()
-            self.fuente.start()
-        # deja arrancar el hilo para poder reportar un error temprano
-        time.sleep(0.05)
+            self.error = None
+
+            nueva.start()
+            # No responder "activo" antes de confirmar que la fuente arranco (B6).
+            if not nueva.esperar_arranque(timeout=5.0):
+                err = nueva.errores[-1] if nueva.errores else "la fuente no arranco"
+                self._detener_sin_lock()
+                self.fuente_nombre = fuente
+                self.archivo = archivo
+                self.error = err
+                raise RuntimeError(err)
         return self.estado()
 
     def detener(self) -> dict:
@@ -91,7 +108,12 @@ class VivoSesion:
         if self.fuente is not None:
             try:
                 self.fuente.detener()
-                self.fuente.join(timeout=1.5)
+                self.fuente.join(timeout=2.0)
+                # Si el hilo sigue vivo no se fuerza el cierre del archivo:
+                # `LoggerVivo.registrar` ignora escrituras tras `cerrar` (B11),
+                # asi que cerrarlo es seguro aunque tarde un poco mas.
+                if self.fuente.is_alive():
+                    self.fuente.join(timeout=2.0)
             except Exception:  # noqa: BLE001
                 pass
         if self.logger is not None:
@@ -118,7 +140,14 @@ class VivoSesion:
     # --- consulta ---
     def estado(self) -> dict:
         if self.motor is None:
-            return {"activo": False, "fuente": None, "n": 0, "degradacion_modo": "none"}
+            return {
+                "activo": False,
+                "fuente": None,
+                "n": 0,
+                "degradacion_modo": "none",
+                "paquetes_perdidos": 0,
+                "errores_subs": 0,
+            }
         estado = self.motor.estado()
         # `activo` = capturando ahora mismo (el motor lo usa como "hay datos").
         estado["activo"] = self.activo
@@ -129,6 +158,12 @@ class VivoSesion:
         estado["ruta_csv"] = self.ruta_csv
         estado["segundos"] = (
             round(time.time() - self.iniciada_en, 2) if self.iniciada_en else None
+        )
+        # Diagnostico de captura (B2/B3): frames salteados y fallos de suscriptores.
+        estado["paquetes_perdidos"] = int(getattr(self.fuente, "paquetes_perdidos", 0) or 0)
+        estado["fs_medida"] = getattr(self.fuente, "fs_medida", None)
+        estado["errores_subs"] = int(getattr(self.bus, "errores_subs", 0) or 0) + int(
+            getattr(self.fuente, "errores_subs_crudos", 0) or 0
         )
         return estado
 

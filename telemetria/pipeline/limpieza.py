@@ -201,7 +201,14 @@ def detectar_outliers(
 def interpolar_huecos(df: pd.DataFrame, cfg: dict, fs: float) -> tuple[pd.DataFrame, dict]:
     li = cfg["limpieza"]
     max_m = max(1, int(round(li["hueco_max_s"] * fs)))
-    columnas = [c for c in df.columns if c not in ("timestamp_s", "lap")]
+    # Solo las senales del esquema definen la validez. Las columnas extra de las
+    # capturas en vivo (``packetId``, ``grip_*``, ``degradacion``) son metadatos
+    # etiquetados y a menudo vacios: si se incluyeran, invalidarian todas las
+    # muestras y el CSV crudo del logger no seria reprocesable en batch (A1/C).
+    del_esquema = set(columnas_esquema())
+    columnas = [
+        c for c in df.columns if c in del_esquema and c not in ("timestamp_s", "lap")
+    ]
     rellenados = 0
     partes = []
     for _, sub in df.groupby("lap", sort=True):

@@ -17,6 +17,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
+from itertools import islice
 from pathlib import Path
 
 import numpy as np
@@ -34,6 +35,8 @@ class BusTiempoReal:
         self._lock = threading.Lock()
         self._subs: list = []
         self.total = 0
+        self.errores_subs = 0
+        self.ultimo_error_sub: str | None = None
 
     def publicar(self, muestra: dict) -> None:
         with self._lock:
@@ -41,7 +44,12 @@ class BusTiempoReal:
             self.total += 1
             subs = list(self._subs)
         for fn in subs:
-            fn(muestra)
+            try:
+                fn(muestra)
+            except Exception as exc:  # noqa: BLE001
+                # No romper el hilo de captura por fallo de suscriptor (B3).
+                self.errores_subs += 1
+                self.ultimo_error_sub = str(exc)
 
     def suscribir(self, fn) -> None:
         with self._lock:
@@ -51,7 +59,14 @@ class BusTiempoReal:
         with self._lock:
             if n is None:
                 return list(self._buf)
-            return list(self._buf)[-int(n):]
+            n = int(n)
+            if n <= 0:
+                return []
+            if n >= len(self._buf):
+                return list(self._buf)
+            # Solo las ultimas n: iterar el deque de derecha a izquierda y
+            # recortar evita copiar el buffer entero en cada llamada (B5).
+            return list(islice(reversed(self._buf), n))[::-1]
 
     def vaciar(self) -> None:
         with self._lock:
@@ -88,10 +103,41 @@ class Fuente(threading.Thread):
         self.errores: list[str] = []
         self.n_leidos = 0
         self.n_publicados = 0
+        self._subs_crudos: list = []
+        # Arranque: la fuente avisa si preparo bien o si fallo (B6).
+        self._arranque = threading.Event()
+        self._fallo_arranque = threading.Event()
+        # Diagnostico (B2): paquetes salteados y frecuencia realmente medida.
+        self.paquetes_perdidos = 0
+        self.fs_medida: float | None = None
+        self.errores_subs_crudos = 0
+        self.ultimo_error_crudo: str | None = None
 
     # --- API ---
     def detener(self) -> None:
         self._detener.set()
+
+    def suscribir_crudo(self, fn) -> None:
+        """Suscriptor que recibe la fila cruda (antes del acondicionador)."""
+        self._subs_crudos.append(fn)
+
+    def esperar_arranque(self, timeout: float = 2.0) -> bool:
+        """Espera a que ``_preparar`` termine.
+
+        Devuelve ``True`` si la fuente quedo lista, ``False`` si fallo o si
+        vencio el plazo. Evita responder "activo" antes de saber si la fuente
+        arranco de verdad (B6).
+        """
+        limite = time.monotonic() + max(0.0, float(timeout))
+        while time.monotonic() < limite:
+            if self._arranque.is_set():
+                return True
+            if self._fallo_arranque.is_set():
+                return False
+            if self._terminado and not self.is_alive():
+                return False
+            time.sleep(0.005)
+        return self._arranque.is_set()
 
     @property
     def detenida(self) -> bool:
@@ -119,6 +165,15 @@ class Fuente(threading.Thread):
 
     def _emitir(self, fila: dict) -> None:
         self.n_leidos += 1
+        # Suscriptores crudos: reciben la fila sin acondicionar (para logger D7)
+        if self._subs_crudos:
+            cruda = dict(fila)
+            for fn in self._subs_crudos:
+                try:
+                    fn(cruda)
+                except Exception as exc:  # noqa: BLE001 - no romper la captura (B3)
+                    self.errores_subs_crudos += 1
+                    self.ultimo_error_crudo = str(exc)
         if self.acondicionador is None:
             self.bus.publicar(fila)
             self.n_publicados += 1
@@ -128,13 +183,22 @@ class Fuente(threading.Thread):
             self.bus.publicar(salida)
             self.n_publicados += 1
 
+    def _limpiar(self) -> None:
+        """Gancho de limpieza al terminar el hilo (subclases: cerrar recursos)."""
+
     def run(self) -> None:  # noqa: D102
         try:
             self._preparar()
         except Exception as exc:  # noqa: BLE001 - se informa por `errores`
             self.errores.append(str(exc))
             self._terminado = True
+            self._fallo_arranque.set()
+            try:
+                self._limpiar()
+            except Exception:  # noqa: BLE001 - la limpieza no debe propagar
+                pass
             return
+        self._arranque.set()
         try:
             while not self._detener.is_set():
                 fila = self._siguiente()
@@ -147,6 +211,10 @@ class Fuente(threading.Thread):
             self.errores.append(str(exc))
         finally:
             self._terminado = True
+            try:
+                self._limpiar()
+            except Exception:  # noqa: BLE001 - la limpieza no debe propagar
+                pass
 
 
 # --------------------------------------------------------------------------
@@ -160,6 +228,8 @@ class FuenteVivo(Fuente):
         self.memoria = memoria or MemoriaAC(prefijo=str(cfg.get("vivo", {}).get("radio_memoria", "Local\\")))
         self._ultimo_packet = -1
         self._t0 = 0.0
+        self._t_ini_captura = 0.0
+        self._n_paquetes = 0
 
     def _preparar(self) -> None:
         self.memoria.abrir()
@@ -169,6 +239,7 @@ class FuenteVivo(Fuente):
         fs_entrada = float(v.get("fs_entrada", self.cfg["sim"]["fs_original"]))
         self.acondicionador = self._crear_acondicionador(fs_entrada)
         self._t0 = time.perf_counter()
+        self._t_ini_captura = self._t0
         self._ultimo_packet = self.memoria.packet_id
 
     def _siguiente(self) -> dict | None:
@@ -178,16 +249,27 @@ class FuenteVivo(Fuente):
         pid = self.memoria.esperar_packet(self._ultimo_packet, timeout_s=0.1)
         if pid == self._ultimo_packet:
             return None
+        # Conteo de paquetes salteados (B2): un salto > 1 significa que la
+        # memoria avanzo entre lecturas y se perdieron frames.
+        salto = int(pid) - int(self._ultimo_packet)
+        if salto > 1:
+            self.paquetes_perdidos += salto - 1
         self._ultimo_packet = pid
+        self._n_paquetes += 1
+        transcurrido = time.perf_counter() - self._t_ini_captura
+        if transcurrido > 0.5:
+            self.fs_medida = self._n_paquetes / transcurrido
         ciclo = time.perf_counter() - self._t0
         return self.memoria.leer_muestra(ciclo=ciclo)
 
     def contexto(self) -> dict:
         return self.memoria.contexto()
 
-    def detener(self) -> None:  # noqa: D102
-        super().detener()
-        self.memoria.cerrar()
+    def _limpiar(self) -> None:
+        # Cerrar la memoria desde el propio hilo de captura, no desde otro
+        # hilo mientras se esta leyendo (D2).
+        if self.memoria is not None:
+            self.memoria.cerrar()
 
 
 # --------------------------------------------------------------------------
@@ -198,6 +280,11 @@ class FuenteCSV(Fuente):
 
     Si existe ``<nombre>_verdad.csv`` al lado, inyecta la columna extra
     ``degradacion`` interpolada al timestamp de cada muestra (modo demo).
+
+    ``ritmo_hz`` es un **interruptor**, no una frecuencia de reproduccion: el
+    ritmo real lo marcan los ``timestamp_s`` del CSV. ``None`` (o ``>0``)
+    reproduce a tiempo real; ``0`` va a maxima velocidad (tests y modo seco
+    interactivo). Se conserva el nombre por compatibilidad con la API (A8).
     """
 
     def __init__(

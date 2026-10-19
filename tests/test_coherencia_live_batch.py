@@ -85,3 +85,39 @@ def test_coherencia_por_vuelta(cfg_live, tmp_path):
     b = mv.loc[comunes].to_numpy()
     assert float(np.corrcoef(a, b)[0, 1]) > 0.9
     assert float(np.mean(np.abs(a - b))) < 3.0  # km/h
+
+
+def test_captura_cruda_reprocesable_en_batch(cfg_live, tmp_path):
+    """El CSV crudo del logger se reprocesa en batch sin doble filtrado (A1/C).
+
+    Es el test que faltaba del logger -> batch: confirma que la captura cruda
+    (antes del acondicionador) atraviesa `limpieza.preprocesar` y produce
+    senal limpia, que es lo que permite volver a analizar una sesion grabada.
+    """
+    from telemetria.adquisicion.motor_vivo import LoggerVivo
+
+    df, _verdad = generador.generar_dataframe(cfg_live, semilla=5)
+    df = df.iloc[:10000].reset_index(drop=True)
+    ruta = tmp_path / "sim.csv"
+    df.to_csv(ruta, index=False)
+
+    bus = BusTiempoReal(max_muestras=2_000_000)
+    logger = LoggerVivo(tmp_path / "vivo", "captura")
+    fuente = FuenteCSV(ruta, bus, cfg_live, ritmo_hz=0)
+    fuente.suscribir_crudo(logger.registrar)  # fila cruda, antes del acondicionador
+    fuente.start()
+    assert fuente.esperar_arranque(5.0)
+    fuente.join(timeout=120)
+    assert not fuente.errores, fuente.errores
+    logger.cerrar()
+
+    crudo = pd.read_csv(logger.ruta)
+    assert len(crudo) > 0
+    assert "grip_fl" in crudo.columns  # columnas extra del logger (A5)
+    # D4: la captura es cruda (no paso por el acondicionador). Si se hubiera
+    # grabado la senal filtrada, el batch aplicaria un segundo filtro.
+    assert len(crudo) == len(df)
+    assert np.allclose(crudo["speed_kmh"].to_numpy(), df["speed_kmh"].to_numpy(), atol=1e-9)
+    limpio, _registro, _estado = limpieza.preprocesar(crudo, cfg_live)
+    assert len(limpio) > 0
+    assert limpio["speed_kmh"].notna().sum() > 0

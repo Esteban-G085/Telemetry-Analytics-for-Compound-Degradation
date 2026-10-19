@@ -73,7 +73,7 @@ Motivo: con datos simulados conoces la degradación verdadera, así que puedes v
 |---|---|---|---|
 | **F1. Simulada** | Generada por `sim/generador.py` | Sí (la conoces por construcción) | Desde el primer día |
 | **F2. Live Telemetry** | App de AC que guarda logs CSV por rueda | Sí, incluye `Tire wear (%)` (verificar columna y si es acumulado de sesión) | Primera captura real (alimenta Etapa 2) |
-| **F3. Logger propio** | Script Python en Windows que lee la memoria compartida de AC | No (solo el proxy) | Etapa 3 (predicción en vivo) |
+| **F3. Logger propio** | Script Python en Windows que lee la memoria compartida de AC | Parcial: `tyreWear` (grip) usado como etiqueta auto-calibrada en la Etapa 3 | Etapa 3 (predicción en vivo) |
 | **F4. Datasets públicos** | Vueltas de AC en Hugging Face (formato parquet) | No | Probar limpieza con datos reales y ruidosos |
 
 ### F1. Datos simulados (la base de la etapa)
@@ -106,7 +106,7 @@ Se usa si quieres controlar la frecuencia y el formato, o si la app F2 no te sir
 - Lee `acpmf_physics`, `acpmf_graphics` y `acpmf_static` (nombres para AC original; ACC usa los mismos nombres con otra estructura).
 - Necesitas las definiciones de la estructura de memoria de AC (por ejemplo, el archivo `sim_info.py` de la comunidad) para interpretar los bytes.
 - Escribe una fila por muestra en CSV con el esquema del proyecto.
-- Nota: la memoria compartida de AC original **no expone el desgaste**, por eso F3 usa el proxy.
+- Nota: la memoria compartida de AC **sí expone `tyreWear[4]`**, una señal de agarre/salud no monótona que la Etapa 3 usa como grip auto-calibrado (`(pico − grip)/pico`); ver `plan_etapa3.md` (D6). El proxy de tiempos sigue disponible para las fuentes que no traen desgaste.
 - Referencia: el proyecto `glama.ai/mcp/servers/khlg0s4evt` lee estas mismas memorias compartidas de AC en Windows (verificar que el enlace siga vivo).
 
 ### F4. Datasets públicos de Hugging Face (datos reales de AC) — *fase posterior*
@@ -179,6 +179,11 @@ Define el formato de los CSV antes de escribir código. Todas las fuentes (F1–
 - [x] Calcular el proxy de trabajo de fricción: suma de |slip| × carga × velocidad × dt.
 - [x] Calcular grados-segundo por encima del umbral de temperatura (D4).
 - [x] Calcular espectro con Welch sobre slip (`nperseg=128`, `noverlap=64`) y obtener potencia en bandas definidas.
+  - **Nota (B8):** la banda «alta» (15–40 Hz) queda en la **zona de transición** del
+    filtro (Butterworth orden 4, corte 20 Hz, D3): ≈ −0.4 dB a 15 Hz, −3 dB a 20 Hz,
+    −14 dB a 30 Hz y −24 dB a 40 Hz. La potencia de esa banda depende de la pendiente
+    del filtro, así que cambiar `corte_hz` cambia su significado sin aviso. El
+    Laboratorio permite variar el corte: al hacerlo, reinterpretar la banda alta.
 - [x] Agregar las ventanas en features por vuelta (para el modelo a nivel de vuelta).
 - [x] **Diseñar las funciones para recibir una ventana, no un archivo completo.** Esto es lo que permite reutilizarlas en la Etapa 3.
 
@@ -213,7 +218,13 @@ Se entrenan en **dos granularidades distintas**, y por eso se comparan al final 
 - [x] Elegir alpha con validación cruzada temporal **agrupada por vuelta**: bloques contiguos de vueltas; ninguna ventana de una vuelta puede aparecer a la vez en train y test.
 - [x] Guardar coeficientes y modelo entrenado.
 - [x] **Verificación física:** los signos de los coeficientes deben concordar con la física (más slip / más carga / más temperatura → más degradación).
-- [x] **Mitigación de circularidad:** entrenar y reportar además un modelo *ablacionado* sin features derivadas de slip/temperatura (y sin `trabajo_friccion`, que también deriva del slip, D15). Si el acople del generador es fuerte, el modelo completo tendrá un ajuste casi perfecto que **no** demuestra capacidad predictiva sobre AC real. Repetir con acople débil.
+- [x] **Mitigación de circularidad:** entrenar y reportar además un modelo *ablacionado* sin features derivadas de slip/temperatura (y sin `trabajo_friccion`, que también deriva del slip, D15). Si el acople del generador es fuerte, el modelo completo tendrá un ajuste casi perfecto que **no** demuestra capacidad predictiva sobre AC real.
+  - **Estado (C):** el modelo completo da MAE 0.0023 sobre la simulación **acoplada**;
+    ese número no es evidencia de generalización (la etiqueta y las features comparten
+    el mismo mecanismo físico). El modelo ablacionado (0.354) no bate a la persistencia
+    (0.1623), lo que confirma que la simulación es circular. **Pendiente:** repetir con
+    un generador de **acople débil** y con datos reales (F2/F3); no hay corrida
+    documentada todavía (coincide con la limitación del README).
 
 ### Filtro de Kalman (nivel vuelta → seguimiento y predicción del escalar)
 - [x] Definir el modelo de estado: nivel con tendencia (nivel = degradación acumulada, pendiente = tasa por vuelta).
@@ -233,6 +244,11 @@ Se entrenan en **dos granularidades distintas**, y por eso se comparan al final 
 - [x] Calcular MAE, RMSE y R² para cada modelo y cada baseline. *El R² solo es engañoso con series temporales y pocos puntos; repórtalo junto al MAE, no en solitario.*
 - [x] Calcular el error en la vuelta de caída (D9): diferencia entre la vuelta predicha y la real donde la degradación supera el umbral. Es la métrica principal.
 - [x] **Validar la cobertura de las bandas de Kalman:** comprobar que el intervalo al 95 % realmente cubre ≈ 95 %. Si no, las bandas son decorativas.
+  - **Estado (C):** en la simulación la cobertura da **1.00**, no 0.95. No es un logro:
+    la etiqueta (degradación verdadera) casi no tiene ruido, así que las bandas salen
+    conservadoras. D17 reporta la sensibilidad a `R`; **sugerencia:** calibrar `R` con
+    el error real de la etiqueta (el MAE del proxy contra la verdad es 0.027) para que
+    las bandas reflejen la incertidumbre que sí existe en pista.
 - [x] Prueba de robustez: agregar ruido al **input** (no a la etiqueta) con SNR decreciente y graficar el error contra el SNR.
 
 **Conceptos de clase:** SNR, robustez frente al ruido.

@@ -6,7 +6,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from telemetria.adquisicion.fuentes import BusTiempoReal, FuenteCSV, columnas_de
+from telemetria.adquisicion.fuentes import (
+    BusTiempoReal,
+    FuenteCSV,
+    FuenteVivo,
+    columnas_de,
+)
 
 
 def _csv_en(tmp_path, n=1000, fs=333.0, lap_por=250):
@@ -79,3 +84,76 @@ def test_fuente_csv_archivo_inexistente(tmp_path, cfg):
     fuente.start()
     fuente.join(timeout=10)
     assert fuente.errores
+
+
+# --- Bloque 2: robustez operativa ------------------------------------------
+def test_esperar_arranque_ok(tmp_path, cfg):
+    """Una fuente valida confirma el arranque (B6)."""
+    ruta = _csv_en(tmp_path)
+    bus = BusTiempoReal(max_muestras=100000)
+    fuente = FuenteCSV(ruta, bus, cfg, ritmo_hz=0)
+    fuente.start()
+    assert fuente.esperar_arranque(timeout=5.0) is True
+    fuente.detener()
+    fuente.join(timeout=10)
+
+
+def test_esperar_arranque_fallo(tmp_path, cfg):
+    """Una fuente invalida no confirma el arranque y deja el error (B6)."""
+    bus = BusTiempoReal()
+    fuente = FuenteCSV(tmp_path / "no_existe.csv", bus, cfg, ritmo_hz=0)
+    fuente.start()
+    assert fuente.esperar_arranque(timeout=5.0) is False
+    assert fuente.errores
+    fuente.join(timeout=10)
+
+
+class _MemoriaFalsa:
+    """Memoria AC simulada que entrega una secuencia de ``packetId``."""
+
+    def __init__(self, pids):
+        self._pids = list(pids)
+        self._i = 0
+        self.fisica = object()
+        self.disponible = False
+        self.error = None
+        self.cerrada = False
+
+    def abrir(self):
+        self.disponible = True
+        return self
+
+    @property
+    def packet_id(self):
+        return self._pids[min(self._i, len(self._pids) - 1)]
+
+    def esperar_packet(self, anterior, timeout_s=0.1, paso_s=0.0005):
+        if self._i < len(self._pids) - 1:
+            self._i += 1
+        return self.packet_id
+
+    def leer_muestra(self, ciclo=None):
+        return {"timestamp_s": float(ciclo or 0.0), "packetId": self.packet_id, "lap": 1}
+
+    def cerrar(self):
+        self.cerrada = True
+        self.disponible = False
+
+    def contexto(self):
+        return {}
+
+
+def test_ac_cuenta_paquetes_perdidos(cfg):
+    """Un salto de ``packetId`` cuenta los frames perdidos (B2)."""
+    bus = BusTiempoReal()
+    memoria = _MemoriaFalsa([1, 2, 5, 6])
+    fuente = FuenteVivo(bus, cfg, memoria=memoria)
+    fuente._preparar()
+    # 1 -> 2 (0 perdidos), 2 -> 5 (2 perdidos), 5 -> 6 (0 perdidos)
+    fuente._siguiente()
+    fuente._siguiente()
+    fuente._siguiente()
+    assert fuente.paquetes_perdidos == 2
+    # la memoria se cierra desde el propio hilo de captura (D2)
+    fuente._limpiar()
+    assert memoria.cerrada
