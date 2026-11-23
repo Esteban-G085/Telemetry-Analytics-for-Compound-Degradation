@@ -22,7 +22,7 @@ El diseño está en [`docs/plan_etapa1.md`](docs/plan_etapa1.md),
 |---|---|---|
 | **1 · Pipeline offline** | Limpieza, features, Ridge y Kalman sobre CSV (fuente simulada F1). | Implementada |
 | **2 · Interfaz** | Backend REST + WebSocket que envuelve el pipeline; GUI PySide6 (8 pestañas) | **Implementada** |
-| **3 · Tiempo real** | Captura desde AC (memoria compartida) y predicción en ventana deslizante; app local en navegador. | **Implementada** |
+| **3 · Tiempo real** | Captura desde AC (memoria compartida) y predicción en ventana deslizante; app local con ventana nativa PySide6. | **Implementada** |
 
 La Etapa 1 ya está preparada para la 3: las features se calculan **por ventana**,
 el filtro es **causal** (guarda su estado) y los parámetros de escalado quedan en
@@ -323,7 +323,7 @@ re-fit de Ridge por WS ≈ 16 ms.
 > Butterworth a 20 Hz. Su potencia depende de `corte_hz`, así que no conviene cambiar
 > el corte sin reinterpretar esa banda (ni al revés).
 
-Los sliders del dashboard se inicializan con estos valores y `DELETE /api/config` los restablece.
+Los controles de la GUI se inicializan con estos valores y `DELETE /api/config` los restablece.
 
 ## Verificación física de los coeficientes
 
@@ -375,7 +375,7 @@ Cualquier fuente (F1…F4) debe producir estas columnas (el contrato está en
 1. **Remuestreo** a 100 Hz con `resample_poly` (antialias) sobre rejilla uniforme.
 2. **Validación** de esquema y marcado de valores fuera de rango físico.
 3. **Outliers** por mediana/MAD en ventana causal (0.5 s, 12·MAD, con piso de σ global).
-   El backend expone las máscaras para poder marcar los picos en el dashboard.
+   El backend expone las máscaras para poder marcar los picos en la GUI.
 4. **Huecos cortos** interpolados sin cruzar vueltas; los largos quedan marcados
    como inválidos (`valido = False`).
 5. **Filtro** Butterworth orden 4, 20 Hz, causal (`sosfilt`), guardando el estado.
@@ -425,7 +425,8 @@ El backend, la GUI de escritorio y el lanzador están completos:
 - [x] **Backend** (`telemetria/api/`, FastAPI REST + WebSocket).
 - [x] **GUI** (`telemetria/gui/`, PySide6 + pyqtgraph): las **ocho pestañas** —
       1 sesiones, 2 telemetría, 3 espectro, 4 predicción, 5 laboratorio,
-      6 robustez, 7 replay, 8 en vivo.
+      6 robustez, 7 replay, 8 en vivo. Con ayuda siempre visible, nombres
+      legibles para las señales y comparador multi-señal en Replay.
 - [x] **App local** (`python -m telemetria` + `ejecutar_app.bat`) que abre la
       ventana nativa. No se necesita Node ni navegador.
 - [x] **Streaming** servidor→cliente: implementado en la Etapa 3
