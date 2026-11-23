@@ -1,8 +1,9 @@
 @echo off
-rem Arranca la app local (Etapa 3). Doble clic o: ejecutar_app.bat --modo seco
+rem Arranca la app de escritorio (PySide6). Doble clic para abrir la ventana nativa.
+rem Opciones: ejecutar_app.bat gui | app | pipeline
 cd /d "%~dp0"
 if exist ".venv\Scripts\python.exe" (
-  ".venv\Scripts\python.exe" -m telemetria app %*
+  ".venv\Scripts\python.exe" -m telemetria %*
 ) else (
-  python -m telemetria app %*
+  python -m telemetria %*
 )

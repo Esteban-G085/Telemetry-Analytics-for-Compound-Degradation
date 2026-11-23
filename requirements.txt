@@ -19,3 +19,8 @@ orjson>=3.10        # serialización JSON rápida (telemetría a 100 Hz)
 websockets>=12.0
 httpx>=0.27.0
 python-multipart>=0.0.12   # subida de CSV (drag & drop) vía /api/sesiones/subir
+
+# --- GUI de escritorio (PySide6): es la interfaz que abre `ejecutar_app.bat` ---
+PySide6>=6.6
+PySide6-Addons>=6.6        # QtWebSockets (QWebSocket) para /ws/telemetria y /api/vivo/stream
+pyqtgraph>=0.13            # graficos rapidos de las pestañas

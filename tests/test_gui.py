@@ -1,0 +1,375 @@
+"""Tests de humo de la GUI PySide6 (sin servidor: cliente API falso).
+
+.verify que las pestañas arrancan sin sesion, que se refrescan al cargar una y
+que sus graficos/tablas entienden el formato real de la API. Sin estos tests la
+GUI puede quedar "bonita pero vacia" sin que pytest se entere.
+"""
+
+from __future__ import annotations
+
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import pytest
+
+pytest.importorskip("PySide6")
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QFrame, QLabel
+
+from telemetria.gui.cliente_api import ApiClient
+from telemetria.gui.ventana_principal import VentanaPrincipal
+
+SESION = {
+    "nombre": "sim_test_99.csv",
+    "laps": [1, 2, 3],
+    "vueltas": [
+        {"lap": 1, "n_muestras": 5000},
+        {"lap": 2, "n_muestras": 4990},
+        {"lap": 3, "n_muestras": 1},  # como la vuelta 9 real: no da PSD
+    ],
+    "n_muestras": 5000,
+    "canales": ["wheel_slip_fl"],
+}
+CANALES = [
+    "timestamp_s",
+    "lap",
+    "wheel_slip_fl",
+    "temp_core_c_fl",
+    "speed_kmh",
+    "throttle",
+    "brake",
+]
+
+
+class ApiFalso(ApiClient):
+    """Cliente que registra llamadas y emite senales sin tocar la red."""
+
+    def __init__(self) -> None:
+        super().__init__(base_url="http://127.0.0.1:1")
+        self.llamadas: list[str] = []
+        self.kwargs: dict[str, dict] = {}
+
+    def salud(self) -> None:
+        self.llamadas.append("salud")
+        self.salud_recibida.emit({"version": "test"})
+
+    def sesion_activa(self) -> None:
+        self.llamadas.append("sesion_activa")
+        self.error_sesion_activa.emit("404 Not Found: no hay sesion activa")
+
+    def sesiones(self) -> None:
+        self.llamadas.append("sesiones")
+        self.sesiones_recibidas.emit({"sesiones": []})
+
+    def conectar_telemetria(self) -> None:
+        self.estado_telemetria.emit("conectado")
+
+    def desconectar_telemetria(self) -> None:
+        self.estado_telemetria.emit("desconectado")
+
+    def canales(self) -> None:
+        self.llamadas.append("canales")
+
+    def espectro(self, **kwargs) -> None:
+        self.llamadas.append("espectro")
+        self.kwargs["espectro"] = kwargs
+
+    def vuelta(self, **kwargs) -> None:
+        self.llamadas.append("vuelta")
+        self.kwargs["vuelta"] = kwargs
+
+    def vuelta_comparar(self, **kwargs) -> None:
+        self.llamadas.append("vuelta_comparar")
+        self.kwargs["vuelta_comparar"] = kwargs
+
+    def kalman(self, **kwargs) -> None:
+        self.llamadas.append("kalman")
+
+    def ridge(self, **kwargs) -> None:
+        self.llamadas.append("ridge")
+
+    def robustez(self, **kwargs) -> None:
+        self.llamadas.append("robustez")
+
+    def sensores(self, **kwargs) -> None:
+        self.llamadas.append("sensores")
+
+    def features(self) -> None:
+        self.llamadas.append("features")
+
+    def vivo_sesiones(self) -> None:
+        self.llamadas.append("vivo_sesiones")
+
+    def vivo_layout(self) -> None:
+        self.llamadas.append("vivo_layout")
+
+    def cerrar(self) -> None:
+        pass
+
+
+@pytest.fixture(scope="module")
+def qt_app():
+    return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture
+def api(qt_app) -> ApiFalso:
+    return ApiFalso()
+
+
+@pytest.fixture
+def ventana(qt_app, api) -> VentanaPrincipal:
+    ventana = VentanaPrincipal(api)
+    ventana.show()
+    yield ventana
+    ventana.close()
+
+
+def test_arranca_sin_sesion_sin_textos_de_error(ventana) -> None:
+    sesiones = ventana.pestanas.widget(0)
+    telemetria = ventana.pestanas.widget(1)
+    replay = ventana.pestanas.widget(6)
+
+    assert "Sin sesion activa" in sesiones.lbl_activa.text()
+    assert "404" not in sesiones.lbl_activa.text()
+    assert "409" not in telemetria.lbl_canales.text()
+    assert "404" not in replay.lbl_kpis.text()
+
+
+def test_todas_las_pestanas_tienen_ayuda_arriba(ventana) -> None:
+    for indice in range(ventana.pestanas.count()):
+        vista = ventana.pestanas.widget(indice)
+        ayuda = getattr(vista, "_ayuda", None)
+        assert ayuda is not None, f"Pestaña {indice} sin ayuda"
+        assert ayuda.text().strip()
+
+        primera = vista._layout.itemAt(0).widget()
+        assert isinstance(primera, QFrame)
+        assert ayuda in primera.findChildren(QLabel)
+
+
+def test_cargar_sesion_refresca_todas_las_vistas(ventana, api) -> None:
+    api.llamadas.clear()
+    api.sesion_activa_recibida.emit(SESION)
+
+    for esperada in ("canales", "kalman", "ridge", "robustez", "sensores", "features"):
+        assert esperada in api.llamadas
+
+
+def test_espectro_y_prediccion_usan_el_formato_real_de_la_api(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+
+    espectro = ventana.pestanas.widget(2)
+    assert espectro.combo_canal.currentData() == "wheel_slip_fl"
+    api.espectro_recibido.emit(
+        {
+            "canal": "wheel_slip_fl",
+            "lap": 1,
+            "freqs": [0.0, 1.0, 2.0],
+            "psd_limpio_db": [-10.0, -20.0, -30.0],
+            "psd_crudo_db": [-5.0, -15.0, -25.0],
+        }
+    )
+    assert len(espectro.curva_limpia.getData()[0]) == 3
+    assert len(espectro.curva_cruda.getData()[0]) == 3
+
+    prediccion = ventana.pestanas.widget(3)
+    api.kalman_recibido.emit(
+        {
+            "laps_test": [2, 3],
+            "pred": [0.2, 0.3],
+            "verdad_laps": [2, 3],
+            "verdad": [0.21, 0.31],
+            "metricas": {"mae": 0.011, "rmse": 0.022},
+        }
+    )
+    api.ridge_recibido.emit(
+        {
+            "laps_all": [1, 2, 3],
+            "pred_all": [0.1, 0.2, 0.3],
+            "metricas": {"mae": 0.003, "rmse": 0.004},
+        }
+    )
+    assert len(prediccion.curva_kalman.getData()[0]) == 2
+    assert len(prediccion.curva_ridge.getData()[0]) == 3
+    assert prediccion.tabla.item(0, 1).text() == "0.011"
+    assert prediccion.tabla.item(1, 1).text() == "0.003"
+
+
+def test_selectores_ocultan_contexto_y_usan_nombres_amables(ventana, api) -> None:
+    api.canales_recibidos.emit({"canales": CANALES})
+    espectro = ventana.pestanas.widget(2)
+    replay = ventana.pestanas.widget(6)
+
+    for combo in (espectro.combo_canal, replay.combo_canal):
+        claves = [combo.itemData(i) for i in range(combo.count())]
+        assert "timestamp_s" not in claves
+        assert "lap" not in claves
+        assert "wheel_slip_fl" in claves
+
+        fila = combo.findData("wheel_slip_fl")
+        assert combo.itemText(fila) == "Deslizamiento FL (delantera izquierda)"
+        assert combo.itemData(fila, Qt.ItemDataRole.ToolTipRole)
+
+    claves_lista = [
+        replay.lista_comparar.item(i).data(Qt.ItemDataRole.UserRole)
+        for i in range(replay.lista_comparar.count())
+    ]
+    assert "timestamp_s" not in claves_lista
+    assert "lap" not in claves_lista
+
+
+def test_espectro_solo_pide_vueltas_de_la_sesion(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    espectro = ventana.pestanas.widget(2)
+
+    assert espectro.spin_lap.minimum() == 0  # 0 = "Todas"
+    assert espectro.spin_lap.maximum() == 2
+    assert espectro._laps == [1, 2]  # la vuelta 3 tiene 1 muestra
+
+    api.llamadas.clear()
+    espectro.spin_lap.setValue(2)
+    assert "espectro" in api.llamadas
+    assert api.kwargs["espectro"]["lap"] == 2
+
+    # Un valor externo fuera de rango no debe llegar al backend (evita 422).
+    espectro.spin_lap.blockSignals(True)
+    espectro.spin_lap.setRange(0, 1000)
+    espectro.spin_lap.setValue(999)
+    espectro.spin_lap.blockSignals(False)
+    api.llamadas.clear()
+    espectro._solicitar_espectro()
+    assert "espectro" not in api.llamadas
+
+
+def test_espectro_traduce_el_422(ventana, api) -> None:
+    espectro = ventana.pestanas.widget(2)
+    api.error_espectro.emit(
+        "Client error '422 Unprocessable Entity' for url 'http://.../espectro'"
+    )
+    titulo = espectro.grafico.getPlotItem().titleLabel.text
+    assert "422" not in titulo
+    assert "muestras suficientes" in titulo
+
+
+def test_paleta_clara_unica(qt_app) -> None:
+    import pyqtgraph as pg
+
+    from telemetria.gui.paleta import PAPEL, TEXTO, aplicar_paleta_clara
+
+    aplicar_paleta_clara(qt_app)
+    assert pg.getConfigOption("background") == PAPEL
+    assert pg.getConfigOption("foreground") == TEXTO
+
+
+def test_replay_no_manda_texto_de_error_como_canal(ventana, api) -> None:
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(6)
+    assert replay.combo_canal.currentData() == "wheel_slip_fl"
+    api.vuelta_recibida.emit(
+        {
+            "lap": 1,
+            "t": [0.0, 0.01],
+            "series": {"wheel_slip_fl": [0.1, 0.2]},
+            "crudo": {"wheel_slip_fl": [0.11, 0.21]},
+            "outliers": {},
+            "kpis": {"n_invalidos": 0, "outliers_total": 0},
+            "n_total": 2,
+        }
+    )
+    assert len(replay.curva_limpia.getData()[0]) == 2
+
+
+def test_replay_preset_y_comparador_multisenal(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(6)
+
+    assert replay.combo_preset.currentText() == "Acelerador + freno"
+    marcados = [
+        replay.lista_comparar.item(i).data(Qt.ItemDataRole.UserRole)
+        for i in range(replay.lista_comparar.count())
+        if replay.lista_comparar.item(i).checkState() == Qt.CheckState.Checked
+    ]
+    assert marcados == ["throttle", "brake"]
+    assert api.kwargs["vuelta_comparar"]["lap"] == 1
+    assert api.kwargs["vuelta_comparar"]["canales"] == ["throttle", "brake"]
+
+    api.vuelta_comparar_recibida.emit(
+        {
+            "lap": 1,
+            "t": [0.0, 0.5, 1.0],
+            "series": {
+                "throttle": [0.0, 1.0, 0.5],
+                "brake": [1.0, 0.0, 0.5],
+            },
+        }
+    )
+    assert set(replay._curvas_comparar) == {"throttle", "brake"}
+    assert replay._curvas_comparar["throttle"].name() == "Acelerador"
+    assert replay._curvas_comparar["brake"].name() == "Freno"
+    assert len(replay._curvas_comparar["throttle"].getData()[0]) == 3
+    titulo = replay.grafico_comparar.getPlotItem().titleLabel.text
+    assert "2 señales" in titulo
+
+
+def test_replay_normaliza_distintas_unidades(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(6)
+
+    replay.chk_normalizar.setChecked(True)
+    api.vuelta_comparar_recibida.emit(
+        {
+            "lap": 1,
+            "t": [0.0, 1.0, 2.0],
+            "series": {
+                "throttle": [10.0, 20.0, 30.0],
+                "brake": [100.0, 200.0, 300.0],
+            },
+        }
+    )
+    for curva in replay._curvas_comparar.values():
+        y = curva.getData()[1]
+        assert min(y) == pytest.approx(0.0)
+        assert max(y) == pytest.approx(1.0)
+
+
+def test_vivo_llena_archivos_y_layout(ventana, api) -> None:
+    vivo = ventana.pestanas.widget(7)
+    api.vivo_sesiones_recibidas.emit(
+        [
+            {"nombre": "captura.csv", "kb": 12.5},
+            {"nombre": "sim_test_99.csv", "kb": 36600.0, "origen": "raw"},
+        ]
+    )
+    assert vivo.combo_archivo.count() == 2
+    assert vivo.combo_archivo.currentText() == "sim_test_99.csv"
+
+    api.vivo_layout_recibido.emit(
+        {"disponible": False, "layout_ok": False, "error": None}
+    )
+    assert "AC publicando: no" in vivo.lbl_layout.text()
+
+
+def test_robustez_muestra_mae_de_sensores(ventana, api) -> None:
+    robustez = ventana.pestanas.widget(5)
+    robustez.combo_sensor.setCurrentText("wheel_slip")
+    robustez.combo_rueda.setCurrentText("fl")
+    robustez.btn_anadir.click()
+    assert robustez.tabla_sensores.rowCount() == 1
+
+    api.sensores_recibidos.emit(
+        {
+            "caidos": [{"canal": "wheel_slip", "rueda": "fl"}],
+            "mae_base": 0.09,
+            "mae": 0.12,
+            "delta": 0.03,
+        }
+    )
+    assert robustez.tabla_sensores.item(0, 2).text() == "0.12"
+    assert "MAE base: 0.09" in robustez.lbl_sensores.text()

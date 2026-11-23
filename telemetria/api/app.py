@@ -1,7 +1,11 @@
-"""Aplicacion FastAPI: REST + WebSocket + montaje de estaticos.
+"""Aplicacion FastAPI: REST + WebSocket para Telemetry Analytics.
 
 Se crea con :func:`crear_app` para poder inyectar otra carpeta `data/raw` o
 overrides en los tests. El modulo expone `app` listo para uvicorn.
+
+Nota: la interfaz de escritorio (PySide6) se conecta como cualquier otro
+cliente a los endpoints REST y WebSocket, por lo que el backend ya no sirve
+archivos estaticos de un frontend de navegador.
 """
 
 from __future__ import annotations
@@ -10,7 +14,6 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from telemetria.api.respuestas import RespuestaJSON
 from telemetria.api.routers import configuracion, modelos, sesiones, telemetria, vivo
@@ -54,10 +57,6 @@ def crear_app(
     app.include_router(vivo.router)
     app.include_router(stream_telemetria.router)
     app.include_router(stream_vivo.router)
-
-    dist = RAIZ / "frontend" / "dist"
-    if dist.exists():
-        app.mount("/", StaticFiles(directory=str(dist), html=True), name="frontend")
 
     return app
 

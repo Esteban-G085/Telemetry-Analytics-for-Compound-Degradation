@@ -1,18 +1,17 @@
-﻿# Predicción de degradación de neumáticos (Etapas 1, 2 y 3)
+# Predicción de degradación de neumáticos (Etapas 1, 2 y 3)
 
 Proyecto para predecir la degradación de neumáticos a partir de telemetría,
 pensado para Assetto Corsa (AC).
 
 - **Etapa 1 — pipeline offline:** limpieza → features → modelos → evaluación →
   reporte, trabajando sobre CSV. Valida toda la lógica antes de añadir complejidad.
-- **Etapa 2 — dashboard interactivo:** un backend **FastAPI** (REST + WebSocket)
-  que expone el pipeline de la Etapa 1 para inspeccionarlo en vivo y ajustar
-  hiperparámetros sin recargar.
+- **Etapa 2 — backend + interfaz:** un backend **FastAPI** (REST + WebSocket)
+  que expone el pipeline de la Etapa 1 y una **GUI nativa PySide6** con 8 pestañas
+  para inspeccionarlo y ajustar hiperparámetros sin recargar.
 - **Etapa 3 — tiempo real:** captura desde la **memoria compartida de AC**, un
   acondicionador **causal** que filtra y decima a 100 Hz, un motor de análisis en
-  ventana deslizante y la **Vista 7 «En vivo»** (osciloscopio + degradación +
-  predicción), más la **app local en navegador** (`python -m telemetria`,
-  `ejecutar_app.bat`).
+  ventana deslizante y la pestaña **«En vivo»** (osciloscopio + degradación +
+  predicción). La app local se abre con `python -m telemetria` o `ejecutar_app.bat`.
 
 El diseño está en [`docs/plan_etapa1.md`](docs/plan_etapa1.md),
 [`docs/plan_etapa2.md`](docs/plan_etapa2.md) y [`docs/plan_etapa3.md`](docs/plan_etapa3.md).
@@ -22,7 +21,7 @@ El diseño está en [`docs/plan_etapa1.md`](docs/plan_etapa1.md),
 | Etapa | Qué es | Estado |
 |---|---|---|
 | **1 · Pipeline offline** | Limpieza, features, Ridge y Kalman sobre CSV (fuente simulada F1). | Implementada |
-| **2 · Dashboard** | Backend REST + WebSocket que envuelve el pipeline; frontend uPlot (7 vistas) | **Implementada** |
+| **2 · Interfaz** | Backend REST + WebSocket que envuelve el pipeline; GUI PySide6 (8 pestañas) | **Implementada** |
 | **3 · Tiempo real** | Captura desde AC (memoria compartida) y predicción en ventana deslizante; app local en navegador. | **Implementada** |
 
 La Etapa 1 ya está preparada para la 3: las features se calculan **por ventana**,
@@ -41,11 +40,14 @@ FastAPI 0.143. El `requirements.txt` **fusiona** las dependencias de las dos
 etapas (no reemplaza las de la Etapa 1: `matplotlib` y `joblib` siguen siendo
 necesarias).
 
-El **frontend** solo necesita Node 18+ si vas a compilarlo (`cd frontend && npm install`);
-el resultado ya compilado (`frontend/dist/`) se sirve sin Node.
+La **GUI de escritorio** necesita `PySide6`, `PySide6-Addons` (QtWebSockets) y
+`pyqtgraph`, ya incluidos en `requirements.txt`. No se necesita Node: el
+frontend Vite/uPlot original fue sustituido por la GUI y ya no está en el
+repositorio.
 
-La app local se lanza con `python -m telemetria` (o `ejecutar_app.bat`) y abre la
-interfaz en el navegador por defecto.
+La app local se lanza con `python -m telemetria` (o doble clic en
+`ejecutar_app.bat`) y abre la ventana nativa. La guía rápida está en
+[`GUI_USO.md`](GUI_USO.md).
 
 ## Estructura
 
@@ -77,8 +79,8 @@ PROYECTO/
 │   │   ├── fuentes.py        # bus en memoria, FuenteVivo (AC) y FuenteCSV (modo seco)
 │   │   └── motor_vivo.py     # motor de análisis en ventana deslizante + logger CSV
 │   └── api/                  # Etapas 2 y 3: backend FastAPI (envuelve el pipeline)
-│       ├── app.py            # instancia FastAPI, CORS, montaje de frontend/dist
-│       ├── lanzador.py       # abre la app: uvicorn en hilo + navegador
+│       ├── app.py            # instancia FastAPI y CORS (la GUI es otro cliente)
+│       ├── lanzador.py       # arranca uvicorn en un hilo (y el modo navegador legado)
 │       ├── respuestas.py     # respuesta JSON rápida (orjson)
 │       ├── dependencias.py   # inyección de la caché y de la sesión en vivo
 │       ├── routers/          # sesiones, telemetria, modelos, configuracion, vivo
@@ -89,27 +91,19 @@ PROYECTO/
 │           ├── vivo.py                # orquesta fuente + bus + motor + logger
 │           ├── analisis.py            # Ridge, Kalman, espectro, robustez
 │           └── serializacion.py       # numpy -> JSON/Float32
+│   └── gui/                  # interfaz nativa (PySide6): 8 pestañas
+│       ├── main.py           # arranca uvicorn en hilo + QApplication
+│       ├── ventana_principal.py
+│       ├── etiquetas_canales.py  # nombres legibles y columnas de contexto ocultas
+│       ├── cliente_api.py    # REST (httpx) + WS (QWebSocket) en hilos de fondo
+│       └── vistas/           # sesiones, telemetria, espectro, prediccion,
+│                             # laboratorio, robustez, replay, vivo
 ├── data/
 │   ├── raw/                  # CSV crudos + *_verdad.csv (verdad simulada)
 │   ├── processed/            # señal limpia (csv.gz), importancias.csv, modelo_ridge.joblib
 │   ├── vivo/                 # capturas en vivo (crudo + _verdad.csv)
 │   └── reports/              # reporte HTML autocontenido
-├── frontend/                 # dashboard (Vite + uPlot, sin framework)
-│   ├── index.html            # shell: barra de sesión + pestañas + favicon inline
-│   ├── vite.config.js        # proxy /api, /health, /ws hacia el backend en dev
-│   ├── vitest.config.js      # tests del frontend (jsdom + setup)
-│   ├── tests/                # montaje de las 7 vistas
-│   └── src/
-│       ├── main.js           # shell: sesión, pestañas, WebSocket, enrutado
-│       ├── api.js            # cliente REST + CanalTelemetria / CanalVivo (WS)
-│       ├── sesion.js         # activar/recargar la sesión activa (compartido)
-│       ├── estado.js         # store mínimo con pub/sub
-│       ├── formato.js        # formateo de números/fechas
-│       ├── componentes/      # graficas.js (uPlot), degradacion.js, tabla_kpis.js
-│       ├── vistas/           # v_telemetria, v_espectro, v_prediccion,
-│       │                     # v_laboratorio, v_robustez, v_replay, v_vivo
-│       └── estilos/          # variables, layout, widgets, uplot_tema
-└── tests/                    # 123 tests de Python
+└── tests/                    # tests de Python (pipeline, API y GUI offscreen)
 ```
 
 ## Uso — Etapa 1 (pipeline offline)
@@ -139,8 +133,8 @@ python -m uvicorn telemetria.api.app:app --host 127.0.0.1 --port 8000
 - Documentación interactiva (Swagger): <http://127.0.0.1:8000/docs>
 - Sonda de vida: <http://127.0.0.1:8000/health>
 
-> Cuando exista `frontend/dist`, `telemetria/api/app.py` la monta automáticamente en `/`
-> y la aplicación web queda servida por este mismo proceso.
+> El backend ya no sirve archivos estáticos: la GUI de escritorio se conecta a
+> estos endpoints como cualquier otro cliente (ver `GUI_USO.md`).
 
 ### Endpoints REST
 
@@ -183,8 +177,8 @@ Protocolo híbrido (plan D4):
 Los cómputos pesados se despachan con `asyncio.to_thread` / `run_in_threadpool` para que el event
 loop nunca se bloquee.
 
-> El **replay** no vive en el backend: sobre una sesión grabada el frontend ya tiene las muestras
-> en un `Float32Array` y reproduce avanzando un cursor. El streaming en vivo sí nace en el
+> El **replay** no vive en el backend: sobre una sesión grabada la GUI pide cada vuelta
+> por `/api/telemetria/vuelta/{lap}` y la dibuja. El streaming en vivo sí nace en el
 > servidor y se sirve por `/api/vivo/stream` (Etapa 3).
 
 ## Uso — Etapa 3 (tiempo real)
@@ -229,87 +223,60 @@ El servidor empuja una trama JSON cada ~100 ms con `tipo: "vivo"`: `n`, `lap`,
 puede enviar `{"canales": [...], "n": 200}` para elegir qué ventana recibe y
 `{"tipo": "ping"}`.
 
-### App local (navegador)
+### App local (GUI de escritorio)
 
 ```bash
-python -m telemetria                    # abre la app (uvicorn en hilo) + navegador
-python -m telemetria app --modo seco    # arranca el modo seco con el CSV demo
-python -m telemetria app --modo ac      # arranca la captura desde AC
-python -m telemetria app --sin-navegador  # solo el servidor (diagnóstico)
+python -m telemetria                    # abre la GUI (uvicorn en hilo + ventana nativa)
+python -m telemetria gui                # equivalente, explicito
+python -m telemetria pipeline           # solo el pipeline offline
+python -m telemetria app --sin-navegador  # legado: solo el servidor (diagnóstico)
 ```
 
-`telemetria/api/lanzador.py` levanta `uvicorn` en un hilo, espera a `/health` y
-abre la UI en el **navegador por defecto** (D10). Doble clic en `ejecutar_app.bat`
-hace lo mismo sin escribir comandos.
+`telemetria/gui/main.py` levanta `uvicorn` en un hilo, espera a `/health` y abre
+la ventana PySide6. Doble clic en `ejecutar_app.bat` hace lo mismo sin escribir
+comandos. El subcomando `app` es el antiguo lanzador de navegador y queda como
+diagnóstico; no abre interfaz porque el frontend Vite/uPlot ya no está incluido.
 
-## Uso — Etapa 2 (frontend)
+## Uso — Interfaz de escritorio (GUI)
 
-El dashboard es una app **Vite + [uPlot](https://github.com/leeoniya/uPlot)** sin
-framework (D8: objeto plano + pub/sub). En desarrollo habla con el backend por el
-proxy de Vite (rutas relativas `/api`, `/ws`):
+La GUI es una app **PySide6 + pyqtgraph**. No necesita Node ni navegador: habla
+con el backend por las mismas rutas REST `/api` y WebSocket `/ws`, `/api/vivo/stream`.
 
 ```bash
-cd frontend
-npm install
-npm run dev          # http://127.0.0.1:5173  (proxy -> backend en :8000)
+python -m telemetria          # o doble clic en ejecutar_app.bat
 ```
 
-Para producción, compila y deja que FastAPI sirva el resultado en `/`:
+Flujo normal: abrir la pestaña **Sesiones**, elegir un CSV de `data/raw/` y pulsar
+**Cargar sesión seleccionada**. Al cargar, las demás pestañas se recargan solas.
+Antes de cargar una sesión muestran «Sin sesión activa» en lugar de errores HTTP.
 
-```bash
-npm run build        # genera frontend/dist/ (lo monta telemetria/api/app.py)
-```
+### Las ocho pestañas
 
-Tests de montaje (jsdom, sin navegador):
-
-```bash
-npm test             # vitest: cada vista monta y limpia sin lanzar
-```
-
-### Las siete vistas
-
-| # | Vista | Qué muestra |
+| # | Pestaña | Qué muestra |
 |---|---|---|
-| 1 | **Telemetría** | Señal cruda vs. limpia de una vuelta, marcadores de outliers, huecos inválidos y KPIs de calidad. |
-| 2 | **Espectro** | PSD de Welch (crudo vs. limpio) con las bandas sombreadas y la atenuación por banda; planta 2×2 con la media por rueda y dispersión de features (§3.2). |
-| 3 | **Predicción** | Verdad/proxy, Ridge y Kalman por vuelta, bandas de confianza, líneas de caída y tabla de métricas. |
-| 4 | **Laboratorio** | Sliders de α/Q/R y ablación (reactivos por WebSocket) + limpieza y `k_fuel` (reprocesan la sesión); guardar / descargar / restablecer config. |
-| 5 | **Robustez** | MAE de Ridge frente a ruido inyectado (con cursor de SNR), importancias con verificación de signo físico y simulador de fallo de sensores (§3.5). |
-| 6 | **Replay** | Reproducción local del stint con ventana deslizante, control de velocidad y degradación estimada de la vuelta en curso. |
-| 7 | **En vivo** | Captura desde AC (o modo seco): osciloscopio de la ventana reciente, espectro, planta 2×2 con el semáforo de degradación y predicción Kalman; control de iniciar/detener. |
+| 1 | **Sesiones** | Lista de CSV, carga de sesión y resumen (vueltas, muestras). |
+| 2 | **Telemetría** | Canales disponibles, gráfico de tramas binarias del WS y mensajes de control. |
+| 3 | **Espectro** | PSD de Welch (crudo vs. limpio) del canal y vuelta elegidos. |
+| 4 | **Predicción** | Verdad/proxy, Ridge y Kalman por vuelta, tabla de MAE/RMSE y recálculo de α y Q/R. |
+| 5 | **Laboratorio** | Q/R de Kalman, configuración activa y features; guardar/restablecer config. |
+| 6 | **Robustez** | MAE frente a ruido inyectado (SNR) y simulador de fallo de sensores. |
+| 7 | **Replay** | Comparador de varias señales de una vuelta + detalle crudo/limpio, outliers y KPIs. |
+| 8 | **En vivo** | Captura AC/modo seco, estado del motor y osciloscopio del WS de vivo. |
 
-> La **Vista 4** separa los controles en dos familias: los del **modelo** (Ridge α,
-> Kalman Q/R, monotonicidad, ablación) viajan por el WebSocket y recalculan la curva
-> sin recargar; los de **limpieza/features** (corte, MAD, grados·segundo, `k_fuel`)
-> se guardan como overrides y **reprocesan** el CSV (`POST /api/config` +
-> `POST /api/sesiones/cargar`), que es la operación lenta.
+Cada pestaña lleva arriba un bloque «Qué estás viendo» siempre visible. Los
+selectores muestran nombres como «Acelerador» o «Deslizamiento FL (delantera
+izquierda)» en lugar de claves internas; `timestamp_s` y `lap` no se ofrecen como
+señales porque son el eje temporal y el agrupador de vueltas. En **Replay** se
+pueden comparar varias señales de la misma vuelta (atajos preparados, selección
+manual y normalización 0–1) sin perder el panel de detalle de una sola señal.
 
-### Trampa de uPlot: nunca llames a `redraw()` sin argumentos
+El panel superior permite conectar/desconectar el WebSocket `/ws/telemetria`.
+En la pestaña **En vivo**, al iniciar una captura se abre automáticamente
+`/api/vivo/stream` (~10 Hz) para el osciloscopio. Detalles en `GUI_USO.md`.
 
-Todas las gráficas pasan por el envoltorio `Panel` de
-`frontend/src/componentes/graficas.js`. Ahí vive una trampa que dejó el dashboard
-**entero sin líneas** (se veían ejes y rejilla, pero ninguna serie) y conviene no
-reintroducir:
-
-- `uPlot.redraw()` **sin argumentos** ejecuta `_setScale("x", scales.x.min, scales.x.max)`.
-- Pero `uPlot.setScale()` **no aplica el rango de inmediato**: lo deja *pendiente* en
-  `pendScales` y lo aplica `setScales()` dentro del `_commit`, que corre en un microtask.
-- Los paneles se crean y se rellenan en el mismo tick (`new Panel(...)` → `datos()` →
-  `anotaciones()`). Cuando `anotaciones()` llama a `redraw()`, el auto-rango que acaba de
-  fijar `datos()` **aún no se ha aplicado**, así que `scales.x.min/max` siguen valiendo
-  `null`; `redraw()` reenvía ese `null` y **sobrescribe** el rango pendiente.
-- Resultado: escala X nula → `valToPos(x, "x")` devuelve `NaN` para todos los puntos →
-  el *path* de cada serie sale vacío → ejes sí, líneas no.
-
-Por eso `Panel.anotaciones()` llama a **`this.u.redraw(false)`**: repinta vía `commit()`
-(el hook `_anotar` se ejecuta igual) **sin tocar la escala X**. Regla práctica: para
-repintar anotaciones usa `redraw(false)` o `commit()`, **nunca `redraw()` a secas**.
-
-Cómo detectar un fallo así: **contar píxeles de serie** dentro del área de trazado
-(color saturado distinto de la rejilla). Mirar solo el tamaño del `<canvas>`, que exista
-`.uplot` o que no haya errores de consola **no demuestra que se dibuje nada**. En tests
-headless con Edge/Chrome, `document.hidden` es `true` y `requestAnimationFrame` no
-dispara; uPlot no usa `rAF` (dibuja por `queueMicrotask`), pero conviene recordarlo.
+> Las gráficas usan **pyqtgraph**. Al actualizar una curva conviene pasar siempre
+> `x` e `y` a `setData()`: un `setData(valores)` solo interpreta el array como
+> valores de entrada y deja el eje X en su índice, que no es el tiempo de muestreo.
 
 ## Pruebas
 
@@ -317,7 +284,8 @@ dispara; uPlot no usa `rAF` (dibuja por `queueMicrotask`), pero conviene recorda
 python -m pytest -q
 ```
 
-**123 tests** de Python en verde. Cobertura por área:
+**156 tests** de Python en verde (incluidos 13 de humo de la GUI en modo `offscreen`).
+Cobertura por área:
 
 | Fichero | Qué cubre |
 |---|---|
@@ -333,12 +301,7 @@ python -m pytest -q
 | `tests/test_motor_vivo.py` | Degradación desde grip auto-calibrado, predicción Kalman (agregada y **por rueda**) y logger CSV. |
 | `tests/test_vivo_api.py` | Endpoints `/api/vivo/*` y el WebSocket `/api/vivo/stream` (incluye detener bajo carga). |
 | `tests/test_coherencia_live_batch.py` | **D14**: la ruta en vivo (outliers causales + filtro + decimación) reproduce la señal del pipeline batch con correlación > 0.97. Incluye el reprocesado del **CSV crudo** del logger en batch (logger → batch, A1/C/D4). |
-
-Y **9 tests del frontend** con [Vitest](https://vitest.dev/) + jsdom (`cd frontend && npm test`):
-
-| Fichero | Qué cubre |
-|---|---|
-| `frontend/tests/montaje.test.js` | Cada una de las 7 vistas monta en el DOM, rellena su contenedor y devuelve una limpieza válida sin tocar la red. |
+| `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay; gráficos/tablas usan el formato real de la API. |
 
 Latencia medida contra `uvicorn` real (caché caliente): REST ≈ 13 ms, Kalman por WS ≈ 3 ms,
 re-fit de Ridge por WS ≈ 16 ms.
@@ -455,30 +418,30 @@ debe leerse como logro: con la etiqueta simulada casi sin ruido las bandas no se
 ponen a prueba. En pista conviene **calibrar `R` con el error del proxy** (MAE 0.027)
 para que reflejen incertidumbre real.
 
-## Pendiente de la Etapa 2
+## Estado de la Etapa 2
 
-El backend, el frontend y la app local están completos:
+El backend, la GUI de escritorio y el lanzador están completos:
 
 - [x] **Backend** (`telemetria/api/`, FastAPI REST + WebSocket).
-- [x] **Frontend** (`frontend/`, Vite + uPlot): las **siete vistas** — 1 telemetría,
-      2 espectro, 3 predicción, 4 laboratorio, 5 robustez, 6 replay, 7 en vivo.
-- [x] **App local** (`python -m telemetria` + `ejecutar_app.bat`) que abre el navegador por defecto.
-- [x] **Streaming** servidor→cliente: implementado en la Etapa 3 (`/api/vivo/stream`).
+- [x] **GUI** (`telemetria/gui/`, PySide6 + pyqtgraph): las **ocho pestañas** —
+      1 sesiones, 2 telemetría, 3 espectro, 4 predicción, 5 laboratorio,
+      6 robustez, 7 replay, 8 en vivo.
+- [x] **App local** (`python -m telemetria` + `ejecutar_app.bat`) que abre la
+      ventana nativa. No se necesita Node ni navegador.
+- [x] **Streaming** servidor→cliente: implementado en la Etapa 3
+      (`/api/vivo/stream`), conectado al osciloscopio de la pestaña «En vivo».
 
-Quedan dos extras de la Etapa 2 (módulos §3.2 y §3.5 del plan), ya implementados:
+Extras del plan §3.2 y §3.5:
 
-- [x] **Dispersión de features** (§3.2): panel en la Vista 2 con selectores X/Y (una
-      feature vs. la degradación u otra feature), nube de puntos por vuelta, recta
-      de ajuste y coeficiente de correlación; endpoint `GET /api/modelos/dispersion`
-      (y `GET /api/modelos/correlacion` para la matriz).
-- [x] **Simulador de fallo de sensores** (§3.5): panel en la Vista 5 con
-      interruptores por canal × rueda (slip, temperatura, carga, presión) y globales
-      (velocidad, acelerador, freno, dirección); muestra el MAE de Ridge con y sin
-      cada canal y el mismo MAE tras el suavizado de Kalman; endpoint
+- [x] **Dispersión/correlación de features** (§3.2): disponible en la API
+      (`GET /api/modelos/dispersion` y `GET /api/modelos/correlacion`). La GUI
+      actual no tiene un panel dedicado para esta nube de puntos.
+- [x] **Simulador de fallo de sensores** (§3.5): pestaña **Robustez**, con
+      canales × rueda y el MAE de Ridge con/sin cada fallo; endpoint
       `POST /api/modelos/sensores`.
 
-Solo queda la **validación visual a 60 FPS con 360k muestras**, que requiere un
-navegador real (no se puede medir con jsdom).
+Queda como mejora opcional la **validación visual a 60 FPS con 360k muestras**;
+el pipeline y la API ya están cubiertos por tests de rendimiento y coherencia.
 
 ## Limitaciones conocidas
 
