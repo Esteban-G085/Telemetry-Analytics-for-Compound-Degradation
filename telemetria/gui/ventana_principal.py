@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from telemetria.gui.cliente_api import ApiClient
+from telemetria.gui.dialogo_ayuda import DialogoGuia
 from telemetria.gui.paleta import (
     ACENTO,
     ACENTO_HOVER,
@@ -188,6 +189,7 @@ class VentanaPrincipal(QMainWindow):
         super().__init__()
 
         self.api = api or ApiClient()
+        self._dialogo_guia: DialogoGuia | None = None
         # Fijar la paleta antes de crear cualquier vista: cubre QPalette de Qt
         # (popups, tooltips) y el fondo/ejes de todos los graficos pyqtgraph.
         aplicar_paleta_clara(QApplication.instance())
@@ -224,17 +226,23 @@ class VentanaPrincipal(QMainWindow):
         self.btn_desconectar.setToolTip("Cierra el WebSocket de telemetria.")
         self.lbl_ws = QLabel("WebSocket: desconectado")
         self.lbl_ws.setStyleSheet(f"color: {ERROR}; font-weight: bold;")
+        self.btn_guia = QPushButton("Guía rápida")
+        self.btn_guia.setToolTip(
+            "Abre el paso a paso y el significado de MAE, RMSE, SNR y el resto "
+            "de métricas. Puedes dejarlo abierto mientras exploras las pestañas."
+        )
         panel_vivo.addWidget(self.btn_conectar)
         panel_vivo.addWidget(self.btn_desconectar)
         panel_vivo.addWidget(self.lbl_ws)
+        panel_vivo.addWidget(self.btn_guia)
         panel_vivo.addStretch()
         lay_central.addLayout(panel_vivo)
 
         # Barra de instrucciones para el usuario
         self.lbl_instrucciones = QLabel(
-            "Tip: carga una sesion en la pestaña 'Sesiones', luego explora "
-            "Espectro, Prediccion, Replay, etc. Usa 'Conectar telemetria (WS)' "
-            "para recibir datos en tiempo real."
+            "Tip: carga una sesión en la pestaña 'Sesiones', luego explora "
+            "Espectro, Predicción, Replay, etc. Si es tu primera vez, pulsa "
+            "'Guía rápida'. 'Conectar telemetría (WS)' sirve para datos en vivo."
         )
         self.lbl_instrucciones.setWordWrap(True)
         self.lbl_instrucciones.setStyleSheet(f"color: {TEXTO_SUAVE}; font-style: italic; padding: 4px 0;")
@@ -258,6 +266,7 @@ class VentanaPrincipal(QMainWindow):
         # ------------------------------------------------------------------ Senales
         self.btn_conectar.clicked.connect(self.api.conectar_telemetria)
         self.btn_desconectar.clicked.connect(self.api.desconectar_telemetria)
+        self.btn_guia.clicked.connect(self._abrir_guia)
 
         self.api.salud_recibida.connect(self._on_salud)
         self.api.error_salud.connect(self._on_error_salud)
@@ -269,6 +278,14 @@ class VentanaPrincipal(QMainWindow):
         self.api.sesion_activa()
 
     # ------------------------------------------------------------------ Slots
+    def _abrir_guia(self) -> None:
+        """Muestra la guía rápida; se reutiliza si ya estaba abierta."""
+        if self._dialogo_guia is None:
+            self._dialogo_guia = DialogoGuia(self)
+        self._dialogo_guia.show()
+        self._dialogo_guia.raise_()
+        self._dialogo_guia.activateWindow()
+
     def _on_salud(self, datos: dict) -> None:
         version = datos.get("version", "?")
         self.lbl_estado.setText(f"Backend: online (v{version})")

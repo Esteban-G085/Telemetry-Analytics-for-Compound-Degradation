@@ -46,8 +46,9 @@ frontend Vite/uPlot original fue sustituido por la GUI y ya no está en el
 repositorio.
 
 La app local se lanza con `python -m telemetria` (o doble clic en
-`ejecutar_app.bat`) y abre la ventana nativa. La guía rápida está en
-[`GUI_USO.md`](GUI_USO.md).
+`ejecutar_app.bat`) y abre la ventana nativa. El botón **Guía rápida** de la
+barra superior abre un diálogo no modal con el paso a paso y el glosario de
+métricas; la documentación completa está en [`GUI_USO.md`](GUI_USO.md).
 
 ## Estructura
 
@@ -95,6 +96,8 @@ PROYECTO/
 │       ├── main.py           # arranca uvicorn en hilo + QApplication
 │       ├── ventana_principal.py
 │       ├── etiquetas_canales.py  # nombres legibles y columnas de contexto ocultas
+│       ├── glosario.py       # definiciones de métricas para tooltips y guía
+│       ├── dialogo_ayuda.py  # «Guía rápida» no modal
 │       ├── cliente_api.py    # REST (httpx) + WS (QWebSocket) en hilos de fondo
 │       └── vistas/           # sesiones, telemetria, espectro, prediccion,
 │                             # laboratorio, robustez, replay, vivo
@@ -256,19 +259,23 @@ Antes de cargar una sesión muestran «Sin sesión activa» en lugar de errores 
 |---|---|---|
 | 1 | **Sesiones** | Lista de CSV, carga de sesión y resumen (vueltas, muestras). |
 | 2 | **Telemetría** | Canales disponibles, gráfico de tramas binarias del WS y mensajes de control. |
-| 3 | **Espectro** | PSD de Welch (crudo vs. limpio) del canal y vuelta elegidos. |
-| 4 | **Predicción** | Verdad/proxy, Ridge y Kalman por vuelta, tabla de MAE/RMSE y recálculo de α y Q/R. |
+| 3 | **Espectro** | PSD de Welch (crudo vs. limpio) del canal y vuelta elegidos, con bandas Baja/Media/Alta etiquetadas. |
+| 4 | **Predicción** | Verdad/proxy, Ridge y Kalman por vuelta, tabla de error medio (MAE) y error grande (RMSE), con α y Q/R explicados. |
 | 5 | **Laboratorio** | Q/R de Kalman, configuración activa y features; guardar/restablecer config. |
-| 6 | **Robustez** | MAE frente a ruido inyectado (SNR) y simulador de fallo de sensores. |
-| 7 | **Replay** | Comparador de varias señales de una vuelta + detalle crudo/limpio, outliers y KPIs. |
+| 6 | **Robustez** | Error frente al ruido (SNR), error sin fallos y subida del error ↑ al desconectar sensores. |
+| 7 | **Replay** | Comparador de varias señales de una vuelta + detalle crudo/limpio, outliers y tarjetas de calidad. |
 | 8 | **En vivo** | Captura AC/modo seco, estado del motor y osciloscopio del WS de vivo. |
 
-Cada pestaña lleva arriba un bloque «Qué estás viendo» siempre visible. Los
-selectores muestran nombres como «Acelerador» o «Deslizamiento FL (delantera
-izquierda)» en lugar de claves internas; `timestamp_s` y `lap` no se ofrecen como
-señales porque son el eje temporal y el agrupador de vueltas. En **Replay** se
-pueden comparar varias señales de la misma vuelta (atajos preparados, selección
-manual y normalización 0–1) sin perder el panel de detalle de una sola señal.
+Cada pestaña lleva arriba un bloque «Qué estás viendo» siempre visible. El botón
+**Guía rápida** de la barra superior abre un diálogo no modal con el flujo básico
+y un glosario de MAE, RMSE, SNR, outlier, PSD, Welch, bandas, α, Q/R, verdad/proxy
+y calidad; los mismos textos aparecen en los tooltips. Los selectores muestran
+nombres como «Acelerador» o «Deslizamiento FL (delantera izquierda)» en lugar de
+claves internas; `timestamp_s` y `lap` no se ofrecen como señales porque son el
+eje temporal y el agrupador de vueltas. En **Replay** se pueden comparar varias
+señales de la misma vuelta (atajos preparados, selección manual y normalización
+0–1) sin perder el panel de detalle, y las tarjetas **Muestras válidas**,
+**Descartadas** y **Calidad (%)** resumen la calidad de la vuelta.
 
 El panel superior permite conectar/desconectar el WebSocket `/ws/telemetria`.
 En la pestaña **En vivo**, al iniciar una captura se abre automáticamente
@@ -284,7 +291,7 @@ En la pestaña **En vivo**, al iniciar una captura se abre automáticamente
 python -m pytest -q
 ```
 
-**156 tests** de Python en verde (incluidos 13 de humo de la GUI en modo `offscreen`).
+**160 tests** de Python en verde (incluidos 17 de humo de la GUI en modo `offscreen`).
 Cobertura por área:
 
 | Fichero | Qué cubre |
@@ -301,7 +308,7 @@ Cobertura por área:
 | `tests/test_motor_vivo.py` | Degradación desde grip auto-calibrado, predicción Kalman (agregada y **por rueda**) y logger CSV. |
 | `tests/test_vivo_api.py` | Endpoints `/api/vivo/*` y el WebSocket `/api/vivo/stream` (incluye detener bajo carga). |
 | `tests/test_coherencia_live_batch.py` | **D14**: la ruta en vivo (outliers causales + filtro + decimación) reproduce la señal del pipeline batch con correlación > 0.97. Incluye el reprocesado del **CSV crudo** del logger en batch (logger → batch, A1/C/D4). |
-| `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay; gráficos/tablas usan el formato real de la API. |
+| `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay; también cubre la «Guía rápida», las tarjetas de calidad, las cabeceras claras de métricas y las etiquetas de bandas. |
 
 Latencia medida contra `uvicorn` real (caché caliente): REST ≈ 13 ms, Kalman por WS ≈ 3 ms,
 re-fit de Ridge por WS ≈ 16 ms.
@@ -426,7 +433,9 @@ El backend, la GUI de escritorio y el lanzador están completos:
 - [x] **GUI** (`telemetria/gui/`, PySide6 + pyqtgraph): las **ocho pestañas** —
       1 sesiones, 2 telemetría, 3 espectro, 4 predicción, 5 laboratorio,
       6 robustez, 7 replay, 8 en vivo. Con ayuda siempre visible, nombres
-      legibles para las señales y comparador multi-señal en Replay.
+      legibles para las señales, comparador multi-señal en Replay, botón
+      **Guía rápida** no modal con glosario, tarjetas de calidad y métricas con
+      nombres autoexplicativos (bandas etiquetadas incluidas).
 - [x] **App local** (`python -m telemetria` + `ejecutar_app.bat`) que abre la
       ventana nativa. No se necesita Node ni navegador.
 - [x] **Streaming** servidor→cliente: implementado en la Etapa 3

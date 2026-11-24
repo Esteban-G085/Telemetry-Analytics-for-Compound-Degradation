@@ -99,6 +99,12 @@ class ApiFalso(ApiClient):
     def features(self) -> None:
         self.llamadas.append("features")
 
+    def config(self) -> None:
+        # VistaLaboratorio lo pide al construirse; sin esta redundancia el
+        # cliente real intentaría hablar con el backend durante los tests.
+        self.llamadas.append("config")
+        self.config_recibida.emit({})
+
     def vivo_sesiones(self) -> None:
         self.llamadas.append("vivo_sesiones")
 
@@ -372,4 +378,84 @@ def test_robustez_muestra_mae_de_sensores(ventana, api) -> None:
         }
     )
     assert robustez.tabla_sensores.item(0, 2).text() == "0.12"
-    assert "MAE base: 0.09" in robustez.lbl_sensores.text()
+    assert "Error sin fallos: 0.09" in robustez.lbl_sensores.text()
+    assert "Subida: ↑ 0.03" in robustez.lbl_sensores.text()
+
+
+def test_guia_rapida_se_abre_y_explica_metricas(ventana) -> None:
+    ventana.btn_guia.click()
+    dialogo = ventana._dialogo_guia
+
+    assert dialogo is not None
+    assert dialogo.isVisible()
+    texto = dialogo.contenido.toPlainText()
+    for esperado in ("MAE", "RMSE", "Replay", "Glosario", "Sesiones"):
+        assert esperado in texto
+    dialogo.close()
+
+
+def test_replay_muestra_tarjetas_de_calidad(ventana, api) -> None:
+    replay = ventana.pestanas.widget(6)
+    api.vuelta_recibida.emit(
+        {
+            "lap": 1,
+            "t": [0.0, 0.01, 0.02, 0.03],
+            "series": {"wheel_slip_fl": [0.1, 0.2, 0.3, 0.4]},
+            "crudo": {"wheel_slip_fl": [0.1, 0.2, 9.9, 0.4]},
+            "valido": [True, True, False, True],
+            "outliers": {"wheel_slip_fl": [2]},
+            "kpis": {"n_invalidos": 1, "outliers_total": 1},
+            "n_total": 4,
+        }
+    )
+
+    assert replay.lbl_muestras_validas.text() == "3"
+    assert replay.lbl_descartadas.text() == "1"
+    assert replay.lbl_calidad.text() == "75.0 %"
+    for etiqueta in (
+        replay.lbl_muestras_validas,
+        replay.lbl_descartadas,
+        replay.lbl_calidad,
+    ):
+        assert etiqueta.toolTip()
+
+
+def test_prediccion_y_robustez_usan_nombres_claros(ventana, api) -> None:
+    prediccion = ventana.pestanas.widget(3)
+    assert prediccion.tabla.horizontalHeaderItem(1).text() == "Error medio (MAE)"
+    assert prediccion.tabla.horizontalHeaderItem(2).text() == "Error grande (RMSE)"
+    assert prediccion.tabla.horizontalHeaderItem(1).toolTip()
+    assert prediccion.spin_alpha.toolTip()
+
+    laboratorio = ventana.pestanas.widget(4)
+    etiquetas_lab = [lbl.text() for lbl in laboratorio.findChildren(QLabel)]
+    for esperada in (
+        "Kalman · nivel (Q):",
+        "Kalman · pendiente (Q):",
+        "Kalman · ruido (R):",
+    ):
+        assert esperada in etiquetas_lab
+    assert laboratorio.spin_q_nivel.toolTip()
+
+    robustez = ventana.pestanas.widget(5)
+    assert robustez.tabla_sensores.horizontalHeaderItem(3).text() == "Subida del error ↑"
+    assert robustez.tabla_sensores.horizontalHeaderItem(3).toolTip()
+    assert robustez.spin_snr.toolTip()
+
+
+def test_espectro_etiqueta_las_bandas(ventana, api) -> None:
+    api.espectro_recibido.emit(
+        {
+            "canal": "wheel_slip_fl",
+            "lap": 1,
+            "freqs": [0.0, 1.0, 2.0],
+            "psd_limpio_db": [-10.0, -20.0, -30.0],
+            "bandas": {"baja": [0.0, 1.0], "media": [1.0, 2.0], "alta": [2.0, 3.0]},
+        }
+    )
+    espectro = ventana.pestanas.widget(2)
+    assert [e.toPlainText() for e in espectro._etiquetas_banda] == [
+        "Baja",
+        "Media",
+        "Alta",
+    ]

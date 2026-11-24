@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from telemetria.gui.cliente_api import ApiClient
+from telemetria.gui.glosario import tooltip
 from telemetria.gui.vistas.vista_base import VistaBase, error_amigable
 
 
@@ -52,38 +53,34 @@ class VistaLaboratorio(VistaBase):
             "<i>config.yaml</i>. El parámetro alpha de Ridge está en Predicción."
         )
 
-        grp_modelo = QGroupBox("Parametros de Kalman")
+        grp_modelo = QGroupBox("Parámetros de Kalman")
         lay = QHBoxLayout()
 
         self.spin_q_nivel = QDoubleSpinBox()
         self.spin_q_nivel.setRange(0.0, 1.0)
         self.spin_q_nivel.setDecimals(6)
         self.spin_q_nivel.setValue(0.0001)
-        self.spin_q_nivel.setToolTip(
-            "Cuánto se fía Kalman de que el nivel de desgaste puede cambiar."
-        )
-        lay.addWidget(QLabel("q_nivel:"))
+        self.spin_q_nivel.setToolTip(tooltip("kalman_q"))
+        lay.addWidget(QLabel("Kalman · nivel (Q):"))
         lay.addWidget(self.spin_q_nivel)
 
         self.spin_q_pend = QDoubleSpinBox()
         self.spin_q_pend.setRange(0.0, 1.0)
         self.spin_q_pend.setDecimals(6)
         self.spin_q_pend.setValue(0.00001)
-        self.spin_q_pend.setToolTip(
-            "Cuánto puede cambiar la pendiente del desgaste."
-        )
-        lay.addWidget(QLabel("q_pendiente:"))
+        self.spin_q_pend.setToolTip(tooltip("kalman_q"))
+        lay.addWidget(QLabel("Kalman · pendiente (Q):"))
         lay.addWidget(self.spin_q_pend)
 
         self.spin_r = QDoubleSpinBox()
         self.spin_r.setRange(0.0, 1.0)
         self.spin_r.setDecimals(6)
         self.spin_r.setValue(0.001)
-        self.spin_r.setToolTip("Ruido esperado en la medición.")
-        lay.addWidget(QLabel("R:"))
+        self.spin_r.setToolTip(tooltip("kalman_r"))
+        lay.addWidget(QLabel("Kalman · ruido (R):"))
         lay.addWidget(self.spin_r)
 
-        self.chk_monotono = QCheckBox("Kalman monotono")
+        self.chk_monotono = QCheckBox("Kalman monótono")
         self.chk_monotono.setChecked(True)
         self.chk_monotono.setToolTip(
             "Obliga a que la degradación estimada no baje."

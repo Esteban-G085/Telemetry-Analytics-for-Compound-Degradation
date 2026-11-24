@@ -31,6 +31,10 @@ ventana.
 
 ## Flujo recomendado
 
+0. Si es tu primera vez, pulsa **Guía rápida** en la barra superior. Se abre
+   una ventana pequeña **no modal**: puedes dejarla abierta mientras recorres
+   las pestañas. Explica los pasos y el significado de MAE, RMSE, SNR, outlier,
+   PSD, bandas, α, Q/R y «subida del error».
 1. Abre la pestaña **Sesiones**.
 2. Elige `sim_test_99.csv` (el CSV demo ligero; `sim_42.csv` pesa ~334 MB) y
    pulsa **Cargar sesión seleccionada**.
@@ -56,6 +60,14 @@ no hay textos blancos sobre fondos claros.
 - **Ayuda siempre visible.** Arriba de cada pestaña hay un recuadro «Qué estás
   viendo» que explica para qué sirve esa pantalla y qué puedes hacer. No hay que
   abrir ningún menú ni consultar este documento para entenderlo.
+- **Guía rápida y glosario.** El botón de la barra superior abre una ventana
+  no modal con «Cómo empezar», «Qué significan las métricas» y «Cómo comparar
+  señales en Replay». Los controles y las cabeceras llevan tooltips con las
+  mismas definiciones, así que no hace falta memorizar siglas.
+- **Métricas con nombre claro.** En Predicción se lee «Error medio (MAE)» y
+  «Error grande (RMSE)», con la nota «Menor es mejor». En Robustez, «Error sin
+  fallos» y «Subida del error ↑» sustituyen a `MAE base` y `Delta`. En Espectro,
+  las franjas sombreadas llevan escrito **Baja**, **Media** y **Alta**.
 - **Nombres comprensibles.** Los selectores muestran nombres como
   «Acelerador», «Freno» o «Deslizamiento FL (delantera izquierda)», con su
   unidad cuando aplica. Si dejas el ratón sobre una opción, el tooltip da una
@@ -78,7 +90,9 @@ La pestaña **Replay** tiene dos zonas:
    escala cada curva entre 0 y 1: es útil para comparar la *forma* de señales con
    unidades distintas (por ejemplo, acelerador en % y temperatura en °C).
 2. **Detalle de una señal** (abajo). Muestra la señal original frente a la
-   filtrada, los puntos descartados como outliers y los KPIs de calidad.
+   filtrada y los puntos descartados. Encima hay tres tarjetas: **Muestras
+   válidas**, **Descartadas** y **Calidad (%)** (porcentaje de muestras marcadas
+   como válidas). Cada tarjeta explica su significado al pasar el ratón.
 
 Ambas zonas usan la misma vuelta seleccionada, pero peticiones distintas: el
 comparador no pisa el gráfico de detalle.
@@ -90,8 +104,10 @@ comparador no pisa el gráfico de detalle.
 | `main.py` | Punto de entrada: arranca backend + ventana |
 | `paleta.py` | Paleta clara única aplicada a Qt (QPalette) y pyqtgraph; colores de serie y de banda. |
 | `etiquetas_canales.py` | Traduce las claves de la API a nombres legibles y oculta las columnas de contexto. |
+| `glosario.py` | Definiciones únicas de MAE, RMSE, SNR, outlier, PSD, bandas, α, Q/R y calidad para tooltips y guía. |
+| `dialogo_ayuda.py` | «Guía rápida»: diálogo no modal con el paso a paso y el glosario. |
 | `cliente_api.py` | Cliente REST (httpx) + WebSocket (QWebSocket). Todas las peticiones van a un hilo de fondo para no congelar la ventana. |
-| `ventana_principal.py` | `QMainWindow`: barra de estado del backend, 8 pestañas, panel conectar/desconectar WebSocket. |
+| `ventana_principal.py` | `QMainWindow`: barra de estado del backend, botón «Guía rápida», 8 pestañas y panel conectar/desconectar WebSocket. |
 | `vistas/vista_base.py` | Clase base de todas las pestañas; provee el bloque de ayuda superior (`agregar_ayuda()`). |
 | `vistas/v_sesiones.py` | Lista de sesiones (CSV), cargar sesión, ver sesión activa. |
 | `vistas/v_telemetria.py` | Canales disponibles y área de gráfico (pyqtgraph). |
@@ -108,11 +124,11 @@ comparador no pisa el gráfico de detalle.
 |---|---------|-------------|------------------|
 | 1 | **Sesiones** | CSV disponibles, cargar sesión, sesión activa | `GET/POST /api/sesiones/*` |
 | 2 | **Telemetría** | Canales disponibles, gráfico base | `GET /api/telemetria/canales` |
-| 3 | **Espectro** | PSD de Welch por canal (crudo/limpio) | `GET /api/telemetria/espectro` |
-| 4 | **Predicción** | Degradación estimada (Ridge, Kalman), métricas | `POST /api/modelos/kalman/estimar`, `POST /api/modelos/ridge/ajustar` |
+| 3 | **Espectro** | PSD de Welch por canal (crudo/limpio), bandas Baja/Media/Alta etiquetadas | `GET /api/telemetria/espectro` |
+| 4 | **Predicción** | Degradación estimada (Ridge, Kalman), error medio (MAE) y error grande (RMSE) | `POST /api/modelos/kalman/estimar`, `POST /api/modelos/ridge/ajustar` |
 | 5 | **Laboratorio** | Q/R de Kalman, guardar/restablecer config, features (α está en Predicción) | `GET/POST/DELETE /api/config`, `GET /api/modelos/features` |
-| 6 | **Robustez** | MAE vs SNR, fallo de sensores | `POST /api/modelos/robustez`, `POST /api/modelos/sensores` |
-| 7 | **Replay** | Comparador de varias señales + detalle crudo/limpio, outliers y KPIs | `GET /api/telemetria/vuelta/{lap}` |
+| 6 | **Robustez** | Error frente al ruido (SNR), error sin fallos y subida del error ↑ al desconectar sensores | `POST /api/modelos/robustez`, `POST /api/modelos/sensores` |
+| 7 | **Replay** | Comparador de varias señales + detalle crudo/limpio, outliers y tarjetas de calidad | `GET /api/telemetria/vuelta/{lap}` |
 | 8 | **En vivo** | Captura desde AC o CSV, estado, osciloscopio | `POST/GET /api/vivo/*` |
 
 El panel superior permite conectar/desconectar el WebSocket de telemetría en
@@ -144,11 +160,13 @@ escritorio.
 .venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider
 ```
 
-Incluye 13 tests de humo de la GUI en modo `offscreen`: comprueban que arranca
+Incluye 17 tests de humo de la GUI en modo `offscreen`: comprueban que arranca
 sin sesión, que se refresca al cargar una, que las 8 pestañas tienen ayuda
 visible, que los selectores usan nombres amables y ocultan las columnas de
 contexto, y que el comparador de Replay dibuja varias señales (también
-normalizadas).
+normalizadas). También cubren la **Guía rápida**, las tarjetas de calidad de
+Replay, las cabeceras claras de métricas y las etiquetas de las bandas del
+espectro.
 
 ## Mejora opcional
 

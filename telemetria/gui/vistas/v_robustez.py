@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from telemetria.gui.cliente_api import ApiClient
+from telemetria.gui.glosario import tooltip
 from telemetria.gui.vistas.vista_base import VistaBase, error_amigable
 
 SENSORES = (
@@ -54,8 +55,9 @@ class VistaRobustez(VistaBase):
 
         self.agregar_ayuda(
             "Comprueba qué pasa cuando llega ruido o falla un sensor. SNR bajo "
-            "significa más ruido; MAE alto significa peor predicción. La "
-            "columna <b>Delta</b> es cuánto sube el error al apagar ese canal."
+            "significa más ruido; un MAE alto significa peor predicción. La "
+            "columna <b>Subida del error</b> cuenta cuánto empeora al apagar "
+            "ese canal."
         )
 
         grp_snr = QGroupBox("Error del modelo al añadir ruido (SNR)")
@@ -65,36 +67,34 @@ class VistaRobustez(VistaBase):
         self.spin_snr.setRange(-20.0, 60.0)
         self.spin_snr.setDecimals(1)
         self.spin_snr.setValue(20.0)
-        self.spin_snr.setToolTip(
-            "Relación señal/ruido en dB. Menos dB = más ruido añadido."
-        )
-        lay.addWidget(QLabel("Ruido (SNR dB):"))
+        self.spin_snr.setToolTip(tooltip("snr"))
+        lay.addWidget(QLabel("Ruido añadido (SNR dB):"))
         lay.addWidget(self.spin_snr)
 
-        self.btn_snr = QPushButton("Calcular MAE")
+        self.btn_snr = QPushButton("Calcular error")
         lay.addWidget(self.btn_snr)
         lay.addStretch()
         grp_snr.setLayout(lay)
         layout.addWidget(grp_snr)
 
         self.grafico_snr = pg.PlotWidget()
-        self.grafico_snr.setLabel("left", "MAE")
-        self.grafico_snr.setLabel("bottom", "SNR (dB)")
+        self.grafico_snr.setLabel("left", "Error medio (MAE)")
+        self.grafico_snr.setLabel("bottom", "Ruido añadido (SNR dB)")
         self.grafico_snr.showGrid(x=True, y=True)
-        self.grafico_snr.setTitle("MAE vs SNR (sin datos)")
+        self.grafico_snr.setTitle("Error del modelo frente al ruido (sin datos)")
         self.curva_snr = self.grafico_snr.plot(
             pen=pg.mkPen("b", width=2), symbol="o"
         )
         self.grafico_snr.setMinimumHeight(300)
 
-        grp_grafico = QGroupBox("Grafico MAE vs SNR")
+        grp_grafico = QGroupBox("Gráfico de error frente al ruido")
         lay_g = QVBoxLayout()
         lay_g.addWidget(self.grafico_snr)
         grp_grafico.setLayout(lay_g)
         layout.addWidget(grp_grafico, stretch=1)
 
         grp_sensores = QGroupBox(
-            "Simulador de fallo de sensores (MAE sin cada canal)"
+            "Simulador de fallo de sensores (error al desconectar cada canal)"
         )
         lay_s = QVBoxLayout()
 
@@ -116,18 +116,27 @@ class VistaRobustez(VistaBase):
 
         self.tabla_sensores = QTableWidget(0, 4)
         self.tabla_sensores.setHorizontalHeaderLabels(
-            ["Canal", "Rueda", "MAE", "Delta"]
+            ["Canal", "Rueda", "Error (MAE)", "Subida del error ↑"]
         )
+        self.tabla_sensores.horizontalHeaderItem(2).setToolTip(tooltip("mae"))
+        self.tabla_sensores.horizontalHeaderItem(3).setToolTip(tooltip("delta"))
         self.tabla_sensores.horizontalHeader().setStretchLastSection(True)
         lay_s.addWidget(self.tabla_sensores)
 
+        nota_delta = QLabel(
+            "La flecha ↑ significa que el error sube al apagar ese sensor."
+        )
+        nota_delta.setWordWrap(True)
+        nota_delta.setToolTip(tooltip("delta"))
+        lay_s.addWidget(nota_delta)
+
         self.lbl_sensores = QLabel(
-            "Anyade sensores a la tabla y pulsa 'Calcular MAE por sensor'."
+            "Añade sensores a la tabla y pulsa «Calcular error por sensor»."
         )
         self.lbl_sensores.setWordWrap(True)
         lay_s.addWidget(self.lbl_sensores)
 
-        self.btn_sensores = QPushButton("Calcular MAE por sensor")
+        self.btn_sensores = QPushButton("Calcular error por sensor")
         lay_s.addWidget(self.btn_sensores)
         grp_sensores.setLayout(lay_s)
         layout.addWidget(grp_sensores)
@@ -159,7 +168,7 @@ class VistaRobustez(VistaBase):
         snr_db = datos.get("snr_db", [])
         mae = datos.get("mae", [])
         self.curva_snr.setData(snr_db, mae)
-        self.grafico_snr.setTitle("MAE de Ridge vs SNR (dB)")
+        self.grafico_snr.setTitle("Error del modelo frente al ruido (SNR)")
 
     def _mostrar_error_snr(self, mensaje: str) -> None:
         self.grafico_snr.setTitle(error_amigable(mensaje))
@@ -203,7 +212,7 @@ class VistaRobustez(VistaBase):
         caidos = datos.get("caidos", [])
         if not caidos:
             base = datos.get("mae_base", datos.get("mae", "?"))
-            self.lbl_sensores.setText(f"MAE base (sin fallos): {base}")
+            self.lbl_sensores.setText(f"Error sin fallos: {base}")
             return
 
         # El backend devuelve un unico MAE para el conjunto de sensores caidos;
@@ -219,7 +228,10 @@ class VistaRobustez(VistaBase):
                     self.tabla_sensores.setItem(i, 2, QTableWidgetItem(str(mae)))
                     self.tabla_sensores.setItem(i, 3, QTableWidgetItem(str(delta)))
         base = datos.get("mae_base", "?")
-        self.lbl_sensores.setText(f"MAE base: {base} | MAE con fallo: {mae}")
+        self.lbl_sensores.setText(
+            f"Error sin fallos: {base} | Error con fallo: {mae} | "
+            f"Subida: ↑ {delta}"
+        )
 
     def _mostrar_error_sensores(self, mensaje: str) -> None:
         self.lbl_sensores.setText(error_amigable(mensaje))

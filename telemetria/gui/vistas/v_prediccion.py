@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from telemetria.gui.cliente_api import ApiClient
+from telemetria.gui.glosario import tooltip
 from telemetria.gui.paleta import ACENTO, EXITO, TEXTO
 from telemetria.gui.vistas.vista_base import VistaBase, error_amigable
 
@@ -51,51 +52,39 @@ class VistaPrediccion(VistaBase):
             "parámetros y pulsa <b>Recalcular predicciones</b>."
         )
 
-        grp_controles = QGroupBox("Parametros de los modelos")
+        grp_controles = QGroupBox("Parámetros de los modelos")
         lay = QHBoxLayout()
 
         self.spin_q_nivel = QDoubleSpinBox()
         self.spin_q_nivel.setRange(0.0, 1.0)
         self.spin_q_nivel.setDecimals(6)
         self.spin_q_nivel.setValue(0.0001)
-        self.spin_q_nivel.setToolTip(
-            "Cuánto se fía Kalman de que el nivel de desgaste puede cambiar. "
-            "Más valor = reacciona antes."
-        )
-        lay.addWidget(QLabel("Kalman q_nivel:"))
+        self.spin_q_nivel.setToolTip(tooltip("kalman_q"))
+        lay.addWidget(QLabel("Kalman · nivel (Q):"))
         lay.addWidget(self.spin_q_nivel)
 
         self.spin_q_pend = QDoubleSpinBox()
         self.spin_q_pend.setRange(0.0, 1.0)
         self.spin_q_pend.setDecimals(6)
         self.spin_q_pend.setValue(0.00001)
-        self.spin_q_pend.setToolTip(
-            "Cuánto puede cambiar la pendiente del desgaste. Más valor = "
-            "sigue curvas más pronunciadas."
-        )
-        lay.addWidget(QLabel("q_pendiente:"))
+        self.spin_q_pend.setToolTip(tooltip("kalman_q"))
+        lay.addWidget(QLabel("Kalman · pendiente (Q):"))
         lay.addWidget(self.spin_q_pend)
 
         self.spin_r = QDoubleSpinBox()
         self.spin_r.setRange(0.0, 1.0)
         self.spin_r.setDecimals(6)
         self.spin_r.setValue(0.001)
-        self.spin_r.setToolTip(
-            "Ruido que se espera en la medición. Más valor = curva más suave, "
-            "pero responde más tarde."
-        )
-        lay.addWidget(QLabel("R:"))
+        self.spin_r.setToolTip(tooltip("kalman_r"))
+        lay.addWidget(QLabel("Kalman · ruido (R):"))
         lay.addWidget(self.spin_r)
 
         self.spin_alpha = QDoubleSpinBox()
         self.spin_alpha.setRange(0.0, 10000.0)
         self.spin_alpha.setDecimals(3)
         self.spin_alpha.setValue(0.1)
-        self.spin_alpha.setToolTip(
-            "Fuerza de la regularización de Ridge. Más valor = tendencia más "
-            "simple y menos sensible al ruido."
-        )
-        lay.addWidget(QLabel("Ridge alpha:"))
+        self.spin_alpha.setToolTip(tooltip("alpha"))
+        lay.addWidget(QLabel("Ridge · alpha:"))
         lay.addWidget(self.spin_alpha)
 
         self.btn_calcular = QPushButton("Recalcular predicciones")
@@ -108,7 +97,7 @@ class VistaPrediccion(VistaBase):
         self.grafico.setLabel("left", "Degradacion")
         self.grafico.setLabel("bottom", "Vuelta")
         self.grafico.showGrid(x=True, y=True)
-        self.grafico.setTitle("Prediccion de degradacion (sin datos)")
+        self.grafico.setTitle("Predicción de degradación (sin datos)")
 
         self.curva_verdad = self.grafico.plot(
             pen=pg.mkPen("k", width=2), name="Verdad / proxy"
@@ -136,12 +125,24 @@ class VistaPrediccion(VistaBase):
         layout.addWidget(leyenda)
 
         self.tabla = QTableWidget(0, 3)
-        self.tabla.setHorizontalHeaderLabels(["Modelo", "MAE", "RMSE"])
+        self.tabla.setHorizontalHeaderLabels(
+            ["Modelo", "Error medio (MAE)", "Error grande (RMSE)"]
+        )
+        self.tabla.horizontalHeaderItem(1).setToolTip(tooltip("mae"))
+        self.tabla.horizontalHeaderItem(2).setToolTip(tooltip("rmse"))
         self.tabla.horizontalHeader().setStretchLastSection(True)
 
-        grp_metricas = QGroupBox("Metricas")
+        nota_metricas = QLabel(
+            "Menor es mejor. El MAE es el error típico; el RMSE castiga más "
+            "los fallos grandes."
+        )
+        nota_metricas.setWordWrap(True)
+        nota_metricas.setToolTip(f"{tooltip('mae')}\n{tooltip('rmse')}")
+
+        grp_metricas = QGroupBox("Métricas")
         lay_m = QVBoxLayout()
         lay_m.addWidget(self.tabla)
+        lay_m.addWidget(nota_metricas)
         grp_metricas.setLayout(lay_m)
         layout.addWidget(grp_metricas)
 
@@ -193,7 +194,7 @@ class VistaPrediccion(VistaBase):
             curva.setData(vueltas, valores)
         else:
             curva.clear()
-        self.grafico.setTitle("Prediccion de degradacion (Ridge + Kalman)")
+        self.grafico.setTitle("Predicción de degradación (Ridge + Kalman)")
 
     def _dibujar_referencia(self, datos: dict) -> None:
         vueltas = datos.get("verdad_laps", datos.get("proxy_laps", []))

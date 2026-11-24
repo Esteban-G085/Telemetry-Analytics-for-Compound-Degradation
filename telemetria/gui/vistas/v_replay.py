@@ -14,6 +14,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -29,7 +30,14 @@ from telemetria.gui.etiquetas_canales import (
     etiqueta_canal,
     filtrar_canales,
 )
-from telemetria.gui.paleta import color_serie
+from telemetria.gui.glosario import tooltip
+from telemetria.gui.paleta import (
+    BORDE_SUAVE,
+    PAPEL,
+    TEXTO,
+    TEXTO_SUAVE,
+    color_serie,
+)
 from telemetria.gui.vistas.vista_base import VistaBase, error_amigable
 
 PRESETS: dict[str, tuple[str, ...]] = {
@@ -55,6 +63,37 @@ class VistaReplay(VistaBase):
         self._construir_ui()
         self._conectar_senales()
         # Vueltas y canales llegan con sesion_activa_recibida.
+
+    @staticmethod
+    def _tarjeta(titulo: str, explicacion: str) -> tuple[QFrame, QLabel]:
+        """Crea una tarjeta pequeña; devuelve el marco y su etiqueta de valor."""
+        caja = QFrame()
+        caja.setStyleSheet(
+            f"QFrame {{ background: {PAPEL}; border: 1px solid {BORDE_SUAVE}; "
+            f"border-radius: 6px; }}"
+        )
+        caja.setToolTip(explicacion)
+        lay = QVBoxLayout(caja)
+        lay.setContentsMargins(10, 8, 10, 8)
+        lay.setSpacing(2)
+
+        titulo_label = QLabel(titulo)
+        titulo_label.setStyleSheet(f"color: {TEXTO_SUAVE}; font-size: 11px;")
+        valor = QLabel("—")
+        valor.setStyleSheet(f"color: {TEXTO}; font-size: 16px; font-weight: 600;")
+        valor.setToolTip(explicacion)
+
+        lay.addWidget(titulo_label)
+        lay.addWidget(valor)
+        return caja, valor
+
+    def _limpiar_tarjetas(self) -> None:
+        for etiqueta in (
+            self.lbl_muestras_validas,
+            self.lbl_descartadas,
+            self.lbl_calidad,
+        ):
+            etiqueta.setText("—")
 
     # ------------------------------------------------------------------ UI
     def _construir_ui(self) -> None:
@@ -156,7 +195,23 @@ class VistaReplay(VistaBase):
         grp_grafico.setLayout(lay_g)
         layout.addWidget(grp_grafico, stretch=1)
 
-        self.lbl_kpis = QLabel("KPIs: --")
+        grp_calidad = QGroupBox("Calidad de la vuelta")
+        lay_k = QHBoxLayout()
+        caja_validas, self.lbl_muestras_validas = self._tarjeta(
+            "Muestras válidas", tooltip("vuelta")
+        )
+        caja_descartadas, self.lbl_descartadas = self._tarjeta(
+            "Descartadas", tooltip("outlier")
+        )
+        caja_calidad, self.lbl_calidad = self._tarjeta(
+            "Calidad (%)", tooltip("calidad")
+        )
+        for caja in (caja_validas, caja_descartadas, caja_calidad):
+            lay_k.addWidget(caja)
+        grp_calidad.setLayout(lay_k)
+        layout.addWidget(grp_calidad)
+
+        self.lbl_kpis = QLabel("Carga una vuelta para ver sus métricas.")
         self.lbl_kpis.setWordWrap(True)
         layout.addWidget(self.lbl_kpis)
 
@@ -363,11 +418,22 @@ class VistaReplay(VistaBase):
         n_total = datos.get("n_total", 0)
         n_invalidos = kpis.get("n_invalidos", 0)
         outliers_total = kpis.get("outliers_total", 0)
-        self.lbl_kpis.setText(
-            f"Muestras: {n_total} | Invalidos: {n_invalidos} | Outliers: {outliers_total}"
-        )
+        valido = datos.get("valido") or []
+        if valido:
+            total = len(valido)
+            validas = sum(1 for v in valido if v)
+        else:
+            total = n_total
+            validas = max(total - n_invalidos, 0)
+        calidad = (100.0 * validas / total) if total else 0.0
+
+        self.lbl_muestras_validas.setText(str(validas))
+        self.lbl_descartadas.setText(str(outliers_total))
+        self.lbl_calidad.setText(f"{calidad:.1f} %")
+        self.lbl_kpis.setText("Métricas de la vuelta cargadas.")
 
     def _mostrar_error_sesion(self, mensaje: str) -> None:
+        self._limpiar_tarjetas()
         self.lbl_kpis.setText(error_amigable(mensaje))
 
     def _mostrar_error_canales(self, mensaje: str) -> None:
@@ -376,9 +442,12 @@ class VistaReplay(VistaBase):
         self.combo_canal.clear()
         self.combo_canal.blockSignals(False)
         self.lista_comparar.clear()
+        self._limpiar_tarjetas()
         self.lbl_kpis.setText(error_amigable(mensaje))
 
     def _mostrar_error_vuelta(self, mensaje: str) -> None:
         self.grafico.setTitle(error_amigable(mensaje))
         self.curva_limpia.clear()
         self.curva_cruda.clear()
+        self._limpiar_tarjetas()
+        self.lbl_kpis.setText(error_amigable(mensaje))

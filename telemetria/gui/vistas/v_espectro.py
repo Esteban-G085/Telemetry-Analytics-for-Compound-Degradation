@@ -28,7 +28,8 @@ from telemetria.gui.etiquetas_canales import (
     etiqueta_canal,
     filtrar_canales,
 )
-from telemetria.gui.paleta import COLORES_BANDA
+from telemetria.gui.glosario import tooltip
+from telemetria.gui.paleta import COLORES_BANDA, TEXTO
 from telemetria.gui.vistas.vista_base import VistaBase, error_amigable
 
 
@@ -40,6 +41,7 @@ class VistaEspectro(VistaBase):
         self._canales: list[str] = []
         self._laps: list[int] = []
         self._bandas: list[pg.LinearRegionItem] = []
+        self._etiquetas_banda: list[pg.TextItem] = []
         self._construir_ui()
         self._conectar_senales()
         # La lista de canales y el PSD dependen de la sesion activa.
@@ -60,7 +62,7 @@ class VistaEspectro(VistaBase):
 
         self.combo_canal = QComboBox()
         self.combo_canal.setMinimumWidth(220)
-        lay.addWidget(QLabel("Canal:"))
+        lay.addWidget(QLabel("Señal:"))
         lay.addWidget(self.combo_canal)
 
         self.spin_lap = QSpinBox()
@@ -102,9 +104,10 @@ class VistaEspectro(VistaBase):
             pen=pg.mkPen("r", width=1), name="Original"
         )
         self.grafico.addLegend()
+        self.grafico.setToolTip(tooltip("psd"))
         self.grafico.setMinimumHeight(350)
 
-        grp_grafico = QGroupBox("Grafico")
+        grp_grafico = QGroupBox("Gráfico")
         lay_g = QVBoxLayout()
         lay_g.addWidget(self.grafico)
         grp_grafico.setLayout(lay_g)
@@ -213,24 +216,50 @@ class VistaEspectro(VistaBase):
         self.grafico.setTitle(f"Espectro · {canal} · {lap_txt}")
 
     def _dibujar_bandas(self, bandas: dict) -> None:
-        """Pinta las bandas baja/media/alta que ya devuelve la API."""
+        """Pinta las bandas baja/media/alta con su nombre sobre la franja."""
         for franja in self._bandas:
             self.grafico.removeItem(franja)
+        for etiqueta in self._etiquetas_banda:
+            self.grafico.removeItem(etiqueta)
         self._bandas.clear()
+        self._etiquetas_banda.clear()
 
-        for indice, rango in enumerate(bandas.values()):
+        y_min, y_max = self.grafico.getPlotItem().getViewBox().viewRange()[1]
+        alto = y_max - y_min
+        y_texto = y_max - 0.08 * alto if alto > 0 else y_max
+        nombres = {"baja": "Baja", "media": "Media", "alta": "Alta"}
+        # PySide convierte los dict de las señales en QVariantMap, que ordena
+        # las claves por nombre ('alta', 'baja', 'media'). Aquí imponemos el
+        # orden lógico de frecuencias y dejamos las claves extra al final.
+        orden = ("baja", "media", "alta")
+        claves = [clave for clave in orden if clave in bandas]
+        claves += sorted(clave for clave in bandas if clave not in orden)
+
+        for indice, clave in enumerate(claves):
+            rango = bandas[clave]
             if not isinstance(rango, (list, tuple)) or len(rango) < 2:
                 continue
+            x0, x1 = float(rango[0]), float(rango[1])
             color = QColor(COLORES_BANDA[indice % len(COLORES_BANDA)])
             color.setAlpha(35)
             franja = pg.LinearRegionItem(
-                values=(float(rango[0]), float(rango[1])),
+                values=(x0, x1),
                 brush=pg.mkBrush(color),
                 movable=False,
             )
             franja.setZValue(-10)
             self.grafico.addItem(franja)
             self._bandas.append(franja)
+
+            etiqueta = pg.TextItem(
+                nombres.get(str(clave), str(clave).capitalize()),
+                color=TEXTO,
+                anchor=(0.03, 0.05),
+            )
+            etiqueta.setPos(x0 + 0.03 * (x1 - x0), y_texto)
+            etiqueta.setZValue(5)
+            self.grafico.addItem(etiqueta)
+            self._etiquetas_banda.append(etiqueta)
 
     def _mostrar_error_canales(self, mensaje: str) -> None:
         self._canales = []
