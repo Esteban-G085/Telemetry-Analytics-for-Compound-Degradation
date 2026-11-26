@@ -11,6 +11,7 @@ Dos problemas concretos viven aquí:
 
 from __future__ import annotations
 
+import math
 from bisect import bisect_left
 
 import pyqtgraph as pg
@@ -50,6 +51,8 @@ class ContextoZoom(QWidget):
         self._x: list[float] = []
         self._y: list[float] = []
         self._unidad = ""
+        self._y_min: float | None = None
+        self._y_max: float | None = None
 
         self._construir_ui()
         if on_ver_todo is None:
@@ -97,26 +100,59 @@ class ContextoZoom(QWidget):
         self.setLayout(exterior)
 
     def establecer_datos(
-        self, x: list[float], y: list[float], *, unidad: str = ""
+        self,
+        x: list[float],
+        y: list[float],
+        *,
+        unidad: str = "",
+        series: list[list[float]] | None = None,
     ) -> None:
-        """Dibuja la huella de toda la vuelta y fija los límites de navegación."""
+        """Dibuja la huella de toda la vuelta y fija los límites de navegación.
+
+        ``series`` permite acotar Y con todas las curvas visibles, no solo con
+        la primera: en el comparador cada señal tiene su propia escala.
+        """
         self._x = list(x)
         self._y = list(y)
         self._unidad = unidad
         if not self._x:
             self._curva.clear()
-            self._grafico.plotItem.vb.setLimits(xMin=None, xMax=None)
+            self._y_min = self._y_max = None
+            self._grafico.plotItem.vb.setLimits(
+                xMin=None, xMax=None, yMin=None, yMax=None
+            )
             self.lbl_rango.setText(f"{self._rotulo}: sin datos")
             return
 
         minimo, maximo = min(self._x), max(self._x)
         self._curva.setData(self._x, self._y)
-        self.minimapa.setXRange(minimo, maximo, padding=0.01)
-        if self._y:
-            self.minimapa.setYRange(min(self._y), max(self._y), padding=0.05)
+        finitos: list[float] = []
+        for lista in [self._y] + [list(s) for s in (series or [])]:
+            for valor in lista:
+                try:
+                    numero = float(valor)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(numero):
+                    finitos.append(numero)
+        self._y_min = min(finitos) if finitos else None
+        self._y_max = max(finitos) if finitos else None
+        if self._y_min is not None and self._y_max <= self._y_min:
+            self._y_min -= 0.5
+            self._y_max += 0.5
+
+        if maximo > minimo:
+            self.minimapa.setXRange(minimo, maximo, padding=0)
+        if self._y_min is not None:
+            self.minimapa.setYRange(self._y_min, self._y_max, padding=0)
         # setLimits evita el arrastre libre; el clamp de _limitar_vista cubre
         # los casos en que pyqtgraph aplica padding después del límite.
-        self._grafico.plotItem.vb.setLimits(xMin=minimo, xMax=maximo)
+        self._grafico.plotItem.vb.setLimits(
+            xMin=minimo,
+            xMax=maximo,
+            yMin=self._y_min,
+            yMax=self._y_max,
+        )
         self.actualizar_etiqueta(self._limitar_vista())
 
     def actualizar_etiqueta(self, rango: tuple[float, float] | None = None) -> None:
@@ -141,18 +177,32 @@ class ContextoZoom(QWidget):
         )
 
     def _limitar_vista(self) -> tuple[float, float] | None:
-        """Devuelve el rango X realmente visible, dentro de los datos."""
+        """Devuelve el rango X visible, dentro de los datos, y acota también Y."""
         if not self._x:
             return None
         minimo, maximo = min(self._x), max(self._x)
-        inicio, fin = self._grafico.plotItem.vb.viewRange()[0]
+        vista = self._grafico.plotItem.vb.viewRange()
+        inicio, fin = vista[0]
         corregido = (max(minimo, min(inicio, maximo)), max(minimo, min(fin, maximo)))
         if corregido[0] > corregido[1]:
             corregido = (minimo, maximo)
-        if corregido != (inicio, fin):
+
+        abajo, arriba = vista[1]
+        if self._y_min is not None and self._y_max is not None:
+            y_corregido = (
+                max(self._y_min, min(abajo, self._y_max)),
+                max(self._y_min, min(arriba, self._y_max)),
+            )
+            if y_corregido[0] > y_corregido[1]:
+                y_corregido = (self._y_min, self._y_max)
+        else:
+            y_corregido = (abajo, arriba)
+
+        if corregido != (inicio, fin) or y_corregido != (abajo, arriba):
             self._sincronizando = True
             try:
                 self._grafico.setXRange(*corregido, padding=0)
+                self._grafico.setYRange(*y_corregido, padding=0)
             finally:
                 self._sincronizando = False
         return corregido

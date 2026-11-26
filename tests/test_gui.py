@@ -94,6 +94,7 @@ class ApiFalso(ApiClient):
 
     def robustez(self, **kwargs) -> None:
         self.llamadas.append("robustez")
+        self.kwargs["robustez"] = kwargs
 
     def sensores(self, **kwargs) -> None:
         self.llamadas.append("sensores")
@@ -723,6 +724,53 @@ def test_replay_zoom_no_se_sale_de_la_vuelta(ventana, api) -> None:
     inicio, fin = replay.grafico_comparar.plotItem.vb.viewRange()[0]
     assert inicio >= 0.0 and fin <= 2.0
     assert fin > inicio
+
+
+def test_replay_zoom_en_y_no_se_sale_de_las_series(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(6)
+    # Dos escalas muy distintas: el limite debe cubrirlas a las dos.
+    api.vuelta_comparar_recibida.emit(
+        {
+            "lap": 1,
+            "t": [0.0, 1.0, 2.0],
+            "series": {
+                "throttle": [10.0, 20.0, 30.0],
+                "brake": [1000.0, 2000.0, 3000.0],
+            },
+        }
+    )
+
+    contexto = replay.contexto_comparar
+    replay.grafico_comparar.setYRange(-500.0, 5000.0, padding=0)
+    abajo, arriba = replay.grafico_comparar.plotItem.vb.viewRange()[1]
+    assert abajo >= 10.0 and arriba <= 3000.0
+
+    contexto.btn_ver_todo.click()
+    abajo, arriba = replay.grafico_comparar.plotItem.vb.viewRange()[1]
+    assert abajo >= 10.0 and arriba <= 3000.0
+
+
+def test_espectro_solo_ofrece_canales_de_deslizamiento(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    espectro = ventana.pestanas.widget(2)
+
+    claves = [espectro.combo_canal.itemData(i) for i in range(espectro.combo_canal.count())]
+    assert claves == ["wheel_slip_fl"]
+    assert espectro.combo_canal.currentData() == "wheel_slip_fl"
+
+    api.canales_recibidos.emit({"canales": ["temp_core_c_fl", "speed_kmh"]})
+    assert espectro.combo_canal.count() == 0
+    assert "Sin canales de deslizamiento" in espectro.grafico.getPlotItem().titleLabel.text
+
+
+def test_robustez_pide_snr_negativo_al_cargar(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    snr = api.kwargs["robustez"]["snr_db"]
+    assert min(snr) < 0.0
+    assert 0.0 in snr and 40.0 in snr
 
 
 def test_cursor_detalle_y_unidades(ventana, api) -> None:

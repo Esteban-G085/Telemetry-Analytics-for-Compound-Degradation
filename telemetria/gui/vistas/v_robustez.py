@@ -158,7 +158,9 @@ class VistaRobustez(VistaBase):
 
     # ------------------------------------------------------------------ Slots
     def _on_sesion_activa(self, sesion: dict) -> None:
-        self.api.robustez(snr_db=[40.0, 30.0, 20.0, 10.0, 5.0, 0.0])
+        # Incluye ruido por encima de la señal (SNR negativo): el backend ya
+        # admite cualquier valor y el control permite hasta -20 dB.
+        self.api.robustez(snr_db=[-10.0, 0.0, 10.0, 20.0, 30.0, 40.0])
         self.api.sensores()
 
     def _calcular_snr(self) -> None:

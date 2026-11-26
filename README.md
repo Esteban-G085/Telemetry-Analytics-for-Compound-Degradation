@@ -449,8 +449,10 @@ El backend, la GUI de escritorio y el lanzador están completos:
       1 sesiones, 2 telemetría, 3 espectro, 4 predicción, 5 taller de modelos,
       6 robustez, 7 replay, 8 en vivo. Con ayuda siempre visible, nombres
       legibles para las señales, comparador multi-señal en Replay con minimapa
-      limitado y ejes con unidades, cursor en Replay/Espectro/Predicción,
-      modos archivo/vivo separados, botón **Guía rápida** no modal con glosario,
+      y zoom limitados en X e Y, ejes con unidades, cursor en
+      Replay/Espectro/Predicción, Espectro restringido a canales de
+      deslizamiento y Robustez con SNR negativo, modos archivo/vivo separados,
+      botón **Guía rápida** no modal con glosario,
       tarjetas de calidad y métricas con nombres autoexplicativos (bandas
       etiquetadas incluidas).
 - [x] **App local** (`python -m telemetria` + `ejecutar_app.bat`) que abre la

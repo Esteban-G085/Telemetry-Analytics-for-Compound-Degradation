@@ -53,10 +53,10 @@ class VistaEspectro(VistaBase):
         layout = self._layout
 
         self.agregar_ayuda(
-            "Muestra en qué frecuencias se mueve una señal. La curva verde es "
-            "la señal ya filtrada; la roja es la original. La vuelta <b>0</b> "
-            "usa toda la sesión. Las franjas sombreadas son las bandas baja, "
-            "media y alta."
+            "Muestra en qué frecuencias se mueve el deslizamiento de cada "
+            "neumático. La curva verde es la señal ya filtrada; la roja es la "
+            "original. La vuelta <b>0</b> usa toda la sesión. Las franjas "
+            "sombreadas son las bandas baja, media y alta."
         )
 
         grp_controles = QGroupBox("Espectro de Welch (PSD)")
@@ -169,7 +169,11 @@ class VistaEspectro(VistaBase):
 
     def _llenar_canales(self, datos: dict) -> None:
         brutos = datos.get("canales", [])
-        self._canales = filtrar_canales(brutos) if isinstance(brutos, list) else []
+        self._canales = (
+            [c for c in filtrar_canales(brutos) if c.startswith("wheel_slip_")]
+            if isinstance(brutos, list)
+            else []
+        )
         self.combo_canal.blockSignals(True)
         self.combo_canal.clear()
         for canal in self._canales:
@@ -178,17 +182,15 @@ class VistaEspectro(VistaBase):
             self.combo_canal.setItemData(
                 fila, descripcion_canal(canal), Qt.ItemDataRole.ToolTipRole
             )
-        # Empezar por deslizamiento da un PSD con forma reconocible.
-        for preferido in ("wheel_slip_fl", "temp_core_c_fl", "speed_kmh"):
-            indice = self.combo_canal.findData(preferido)
-            if indice >= 0:
-                self.combo_canal.setCurrentIndex(indice)
-                break
+        # Empezar por la rueda delantera izquierda da un PSD reconocible.
+        indice = self.combo_canal.findData("wheel_slip_fl")
+        if indice >= 0:
+            self.combo_canal.setCurrentIndex(indice)
         self.combo_canal.blockSignals(False)
         if self._canales:
             self._solicitar_espectro()
         else:
-            self.grafico.setTitle("Sin canales disponibles")
+            self.grafico.setTitle("Sin canales de deslizamiento")
             self.curva_limpia.clear()
             self.curva_cruda.clear()
 

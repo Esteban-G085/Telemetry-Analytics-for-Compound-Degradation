@@ -557,6 +557,9 @@ class VistaReplay(VistaBase):
             self._x_comparar_visible,
             self._y_comparar_visible.get(canales[0], []) if canales else [],
             unidad="%" if self.chk_progreso.isChecked() else "s",
+            series=[
+                self._y_comparar_visible.get(c, []) for c in canales[1:]
+            ],
         )
         self.grafico_comparar.setXRange(
             min(self._x_comparar_visible),
@@ -706,6 +709,7 @@ class VistaReplay(VistaBase):
             self._x_comparar_visible,
             self._y_comparar_visible.get(canales[0], []),
             unidad="%" if self.chk_progreso.isChecked() else "s",
+            series=[self._y_comparar_visible.get(c, []) for c in canales[1:]],
         )
         self.grafico_comparar.setXRange(
             min(self._x_comparar_visible),
@@ -792,7 +796,10 @@ class VistaReplay(VistaBase):
             )
             self._actualizar_eje_detalle(nombre_canal)
             self.contexto_detalle.establecer_datos(
-                x_dibujado, dibujadas[nombre_canal], unidad="s"
+                x_dibujado,
+                dibujadas[nombre_canal],
+                unidad="s",
+                series=[crudo_valores] if crudo_valores else [],
             )
             series_cursor = {"Filtrada": dibujadas[nombre_canal]}
             if crudo_valores:
