@@ -17,7 +17,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtWidgets import QApplication, QFrame, QGroupBox, QLabel
+from PySide6.QtWidgets import QApplication, QFrame, QLabel
 
 from telemetria.gui.cliente_api import ApiClient
 from telemetria.gui.reduccion import presupuesto_puntos
@@ -119,18 +119,21 @@ class ApiFalso(ApiClient):
 
 
 class ApiConCacheFalso(ApiClient):
-    """Cliente real con `_get` falso para comprobar la caché de vueltas."""
+    """Cliente real con `_pedir` falso para comprobar la caché de vueltas."""
 
     def __init__(self) -> None:
         super().__init__(base_url="http://127.0.0.1:1")
         self.peticiones = 0
 
-    def _get(self, path: str) -> dict:
+    def _pedir(self, ruta, exito, error, **kwargs) -> None:
+        """Simula la respuesta: ``exito`` es el callback interno, no una señal."""
         self.peticiones += 1
-        return {
-            "t": [0.0, 1.0, 2.0],
-            "series": {"throttle": [0.0, 1.0, 0.5], "brake": [1.0, 0.0, 0.5]},
-        }
+        exito(
+            {
+                "t": [0.0, 1.0, 2.0],
+                "series": {"throttle": [0.0, 1.0, 0.5], "brake": [1.0, 0.0, 0.5]},
+            }
+        )
 
     def cerrar(self) -> None:
         pass
@@ -164,27 +167,21 @@ def ventana(qt_app, api) -> VentanaPrincipal:
 
 def test_arranca_sin_sesion_sin_textos_de_error(ventana) -> None:
     sesiones = ventana.pestanas.widget(0)
-    telemetria = ventana.pestanas.widget(1)
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
 
     assert "Sin sesion activa" in sesiones.lbl_activa.text()
     assert "404" not in sesiones.lbl_activa.text()
-    assert "409" not in telemetria.lbl_canales.text()
     assert "404" not in replay.lbl_kpis.text()
 
 
 def test_modo_archivo_desactiva_tiempo_real(ventana, api) -> None:
-    telemetria = ventana.pestanas.widget(1)
-    assert not ventana.pestanas.isTabEnabled(7)
+    assert not ventana.pestanas.isTabEnabled(6)
     assert not ventana.btn_conectar.isEnabled()
     assert not ventana.btn_desconectar.isEnabled()
     assert "Modo archivo" in ventana.lbl_modo.text()
-    assert not telemetria.findChild(QGroupBox, "grupo_ws").isEnabled()
-    assert not telemetria.findChild(QGroupBox, "grupo_tiempo_real").isEnabled()
-    assert telemetria.findChild(QGroupBox, "grupo_canales").isEnabled()
 
     api.sesion_activa_recibida.emit(SESION)
-    assert not ventana.pestanas.isTabEnabled(7)
+    assert not ventana.pestanas.isTabEnabled(6)
     assert "Modo archivo" in ventana.lbl_modo.text()
 
 
@@ -194,20 +191,14 @@ def test_cambiar_a_modo_vivo_desactiva_pestanas_de_archivo(ventana) -> None:
 
     assert "Modo vivo" in ventana.lbl_modo.text()
     assert ventana.btn_cambiar_modo.text() == "Cambiar a modo archivo"
-    assert ventana.pestanas.isTabEnabled(7)
-    assert ventana.pestanas.isTabEnabled(1)
-    for indice in (0, 2, 3, 4, 5, 6):
+    assert ventana.pestanas.isTabEnabled(6)
+    for indice in (0, 1, 2, 3, 4, 5):
         assert not ventana.pestanas.isTabEnabled(indice)
     assert ventana.btn_conectar.isEnabled()
 
-    telemetria = ventana.pestanas.widget(1)
-    assert telemetria.findChild(QGroupBox, "grupo_ws").isEnabled()
-    assert telemetria.findChild(QGroupBox, "grupo_tiempo_real").isEnabled()
-    assert not telemetria.findChild(QGroupBox, "grupo_canales").isEnabled()
-
     ventana.btn_cambiar_modo.click()
-    assert ventana.pestanas.isTabEnabled(6)
-    assert not ventana.pestanas.isTabEnabled(7)
+    assert ventana.pestanas.isTabEnabled(5)
+    assert not ventana.pestanas.isTabEnabled(6)
 
 
 def test_todas_las_pestanas_tienen_ayuda_arriba(ventana) -> None:
@@ -234,7 +225,7 @@ def test_espectro_y_prediccion_usan_el_formato_real_de_la_api(ventana, api) -> N
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
 
-    espectro = ventana.pestanas.widget(2)
+    espectro = ventana.pestanas.widget(1)
     assert espectro.combo_canal.currentData() == "wheel_slip_fl"
     api.espectro_recibido.emit(
         {
@@ -248,7 +239,7 @@ def test_espectro_y_prediccion_usan_el_formato_real_de_la_api(ventana, api) -> N
     assert len(espectro.curva_limpia.getData()[0]) == 3
     assert len(espectro.curva_cruda.getData()[0]) == 3
 
-    prediccion = ventana.pestanas.widget(3)
+    prediccion = ventana.pestanas.widget(2)
     api.kalman_recibido.emit(
         {
             "laps_test": [2, 3],
@@ -273,8 +264,8 @@ def test_espectro_y_prediccion_usan_el_formato_real_de_la_api(ventana, api) -> N
 
 def test_selectores_ocultan_contexto_y_usan_nombres_amables(ventana, api) -> None:
     api.canales_recibidos.emit({"canales": CANALES})
-    espectro = ventana.pestanas.widget(2)
-    replay = ventana.pestanas.widget(6)
+    espectro = ventana.pestanas.widget(1)
+    replay = ventana.pestanas.widget(5)
 
     for combo in (espectro.combo_canal, replay.combo_canal):
         claves = [combo.itemData(i) for i in range(combo.count())]
@@ -297,7 +288,7 @@ def test_selectores_ocultan_contexto_y_usan_nombres_amables(ventana, api) -> Non
 def test_espectro_solo_pide_vueltas_de_la_sesion(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    espectro = ventana.pestanas.widget(2)
+    espectro = ventana.pestanas.widget(1)
 
     assert espectro.spin_lap.minimum() == 0  # 0 = "Todas"
     assert espectro.spin_lap.maximum() == 2
@@ -319,7 +310,7 @@ def test_espectro_solo_pide_vueltas_de_la_sesion(ventana, api) -> None:
 
 
 def test_espectro_traduce_el_422(ventana, api) -> None:
-    espectro = ventana.pestanas.widget(2)
+    espectro = ventana.pestanas.widget(1)
     api.error_espectro.emit(
         "Client error '422 Unprocessable Entity' for url 'http://.../espectro'"
     )
@@ -340,7 +331,7 @@ def test_paleta_clara_unica(qt_app) -> None:
 
 def test_replay_no_manda_texto_de_error_como_canal(ventana, api) -> None:
     api.canales_recibidos.emit({"canales": CANALES})
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
     assert replay.combo_canal.currentData() == "wheel_slip_fl"
     api.vuelta_recibida.emit(
         {
@@ -359,7 +350,7 @@ def test_replay_no_manda_texto_de_error_como_canal(ventana, api) -> None:
 def test_replay_preset_y_comparador_multisenal(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
 
     assert replay.combo_preset.currentText() == "Acelerador + freno"
     marcados = [
@@ -392,7 +383,7 @@ def test_replay_preset_y_comparador_multisenal(ventana, api) -> None:
 def test_replay_normaliza_distintas_unidades(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
 
     replay.chk_normalizar.setChecked(True)
     api.vuelta_comparar_recibida.emit(
@@ -415,7 +406,7 @@ def test_replay_normaliza_distintas_unidades(ventana, api) -> None:
 def test_replay_comparacion_respeta_el_orden_elegido(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
 
     # PySide entrega el dict ordenado por clave ('brake' antes que 'throttle').
     api.vuelta_comparar_recibida.emit(
@@ -437,7 +428,7 @@ def test_replay_comparacion_respeta_el_orden_elegido(ventana, api) -> None:
 def test_replay_progreso_y_diferencia(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
     api.vuelta_comparar_recibida.emit(
         {
             "lap": 1,
@@ -464,7 +455,7 @@ def test_replay_progreso_y_diferencia(ventana, api) -> None:
 def test_replay_cursor_y_encuadre(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
     api.vuelta_comparar_recibida.emit(
         {
             "lap": 1,
@@ -477,9 +468,8 @@ def test_replay_cursor_y_encuadre(ventana, api) -> None:
     )
 
     pos = replay.grafico_comparar.plotItem.sceneBoundingRect().center()
-    replay._mover_cursor_comparacion(pos)
-    assert replay._lectura_cursor is not None
-    texto = replay._lectura_cursor.toPlainText()
+    replay._cursor_comparar.mover(pos)
+    texto = replay._cursor_comparar.lectura
     assert "Acelerador" in texto
     assert "Freno" in texto
 
@@ -490,7 +480,7 @@ def test_replay_cursor_y_encuadre(ventana, api) -> None:
 
 
 def test_vivo_llena_archivos_y_layout(ventana, api) -> None:
-    vivo = ventana.pestanas.widget(7)
+    vivo = ventana.pestanas.widget(6)
     api.vivo_sesiones_recibidas.emit(
         [
             {"nombre": "captura.csv", "kb": 12.5},
@@ -507,7 +497,7 @@ def test_vivo_llena_archivos_y_layout(ventana, api) -> None:
 
 
 def test_robustez_muestra_mae_de_sensores(ventana, api) -> None:
-    robustez = ventana.pestanas.widget(5)
+    robustez = ventana.pestanas.widget(4)
     robustez.combo_sensor.setCurrentText("wheel_slip")
     robustez.combo_rueda.setCurrentText("fl")
     robustez.btn_anadir.click()
@@ -548,7 +538,7 @@ def test_guia_rapida_se_abre_y_explica_metricas(ventana) -> None:
 
 
 def test_replay_muestra_tarjetas_de_calidad(ventana, api) -> None:
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
     api.vuelta_recibida.emit(
         {
             "lap": 1,
@@ -574,13 +564,13 @@ def test_replay_muestra_tarjetas_de_calidad(ventana, api) -> None:
 
 
 def test_prediccion_y_robustez_usan_nombres_claros(ventana, api) -> None:
-    prediccion = ventana.pestanas.widget(3)
+    prediccion = ventana.pestanas.widget(2)
     assert prediccion.tabla.horizontalHeaderItem(1).text() == "Error medio (MAE)"
     assert prediccion.tabla.horizontalHeaderItem(2).text() == "Error grande (RMSE)"
     assert prediccion.tabla.horizontalHeaderItem(1).toolTip()
     assert not hasattr(prediccion, "spin_alpha")
 
-    laboratorio = ventana.pestanas.widget(4)
+    laboratorio = ventana.pestanas.widget(3)
     etiquetas_lab = [lbl.text() for lbl in laboratorio.findChildren(QLabel)]
     for esperada in (
         "Kalman · nivel (Q):",
@@ -592,7 +582,7 @@ def test_prediccion_y_robustez_usan_nombres_claros(ventana, api) -> None:
     assert laboratorio.spin_q_nivel.toolTip()
     assert laboratorio.spin_alpha.toolTip()
 
-    robustez = ventana.pestanas.widget(5)
+    robustez = ventana.pestanas.widget(4)
     assert robustez.tabla_sensores.horizontalHeaderItem(3).text() == "Subida del error ↑"
     assert robustez.tabla_sensores.horizontalHeaderItem(3).toolTip()
     assert robustez.spin_snr.toolTip()
@@ -608,7 +598,7 @@ def test_espectro_etiqueta_las_bandas(ventana, api) -> None:
             "bandas": {"baja": [0.0, 1.0], "media": [1.0, 2.0], "alta": [2.0, 3.0]},
         }
     )
-    espectro = ventana.pestanas.widget(2)
+    espectro = ventana.pestanas.widget(1)
     assert [e.toPlainText() for e in espectro._etiquetas_banda] == [
         "Baja",
         "Media",
@@ -619,7 +609,7 @@ def test_espectro_etiqueta_las_bandas(ventana, api) -> None:
 def test_replay_pide_puntos_segun_el_ancho_del_grafico(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
 
     assert api.kwargs["vuelta"]["max_puntos"] == presupuesto_puntos(
         replay.grafico.width()
@@ -632,7 +622,7 @@ def test_replay_pide_puntos_segun_el_ancho_del_grafico(ventana, api) -> None:
 def test_replay_zoom_redibuja_sin_repetir_peticion(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
     peticiones = api.llamadas.count("vuelta_comparar")
 
     n = 3000
@@ -659,7 +649,7 @@ def test_replay_zoom_redibuja_sin_repetir_peticion(ventana, api) -> None:
 def test_replay_muestra_rango_visible_y_minimapa(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
 
     n = 3000
     api.vuelta_comparar_recibida.emit(
@@ -705,7 +695,7 @@ def test_replay_muestra_rango_visible_y_minimapa(ventana, api) -> None:
 def test_replay_zoom_no_se_sale_de_la_vuelta(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
     api.vuelta_comparar_recibida.emit(
         {
             "lap": 1,
@@ -729,7 +719,7 @@ def test_replay_zoom_no_se_sale_de_la_vuelta(ventana, api) -> None:
 def test_replay_zoom_en_y_no_se_sale_de_las_series(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
     # Dos escalas muy distintas: el limite debe cubrirlas a las dos.
     api.vuelta_comparar_recibida.emit(
         {
@@ -755,7 +745,7 @@ def test_replay_zoom_en_y_no_se_sale_de_las_series(ventana, api) -> None:
 def test_espectro_solo_ofrece_canales_de_deslizamiento(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    espectro = ventana.pestanas.widget(2)
+    espectro = ventana.pestanas.widget(1)
 
     claves = [espectro.combo_canal.itemData(i) for i in range(espectro.combo_canal.count())]
     assert claves == ["wheel_slip_fl"]
@@ -776,7 +766,7 @@ def test_robustez_pide_snr_negativo_al_cargar(ventana, api) -> None:
 def test_cursor_detalle_y_unidades(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
     api.vuelta_recibida.emit(
         {
             "lap": 1,
@@ -797,7 +787,7 @@ def test_cursor_detalle_y_unidades(ventana, api) -> None:
 def test_replay_etiqueta_ejes_con_unidades(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
 
     api.vuelta_recibida.emit(
         {
@@ -856,7 +846,7 @@ def test_cursor_espectro_y_prediccion(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
 
-    espectro = ventana.pestanas.widget(2)
+    espectro = ventana.pestanas.widget(1)
     api.espectro_recibido.emit(
         {
             "canal": "wheel_slip_fl",
@@ -872,7 +862,7 @@ def test_cursor_espectro_y_prediccion(ventana, api) -> None:
     assert "dB/Hz" in texto_espectro
     assert "Filtrada" in texto_espectro and "Original" in texto_espectro
 
-    prediccion = ventana.pestanas.widget(3)
+    prediccion = ventana.pestanas.widget(2)
     api.kalman_recibido.emit(
         {
             "laps_test": [2, 3],
@@ -891,7 +881,7 @@ def test_cursor_espectro_y_prediccion(ventana, api) -> None:
 def test_cursor_se_oculta_fuera_del_grafico(ventana, api) -> None:
     api.sesion_activa_recibida.emit(SESION)
     api.canales_recibidos.emit({"canales": CANALES})
-    replay = ventana.pestanas.widget(6)
+    replay = ventana.pestanas.widget(5)
     api.vuelta_comparar_recibida.emit(
         {
             "lap": 1,
@@ -900,22 +890,21 @@ def test_cursor_se_oculta_fuera_del_grafico(ventana, api) -> None:
         }
     )
 
-    replay._mover_cursor_comparacion(
+    replay._cursor_comparar.mover(
         replay.grafico_comparar.plotItem.sceneBoundingRect().center()
     )
-    assert replay._lectura_cursor is not None
-    assert replay._lectura_cursor.isVisible()
+    assert replay._cursor_comparar._texto.isVisible()
 
-    replay._mover_cursor_comparacion(QPointF(-10000.0, -10000.0))
-    assert not replay._lectura_cursor.isVisible()
+    replay._cursor_comparar.mover(QPointF(-10000.0, -10000.0))
+    assert not replay._cursor_comparar._texto.isVisible()
 
 
 def test_taller_centraliza_parametros_y_prediccion_solo_resultados(
     ventana, api
 ) -> None:
-    assert ventana.pestanas.tabText(4) == "Taller de modelos"
-    taller = ventana.pestanas.widget(4)
-    prediccion = ventana.pestanas.widget(3)
+    assert ventana.pestanas.tabText(3) == "Taller de modelos"
+    taller = ventana.pestanas.widget(3)
+    prediccion = ventana.pestanas.widget(2)
 
     assert taller.spin_alpha.toolTip()
     taller.spin_alpha.setValue(0.5)

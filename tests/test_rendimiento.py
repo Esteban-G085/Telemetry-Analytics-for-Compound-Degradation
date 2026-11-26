@@ -28,7 +28,7 @@ def _puerto_libre() -> int:
 
 
 async def _medir(datos_demo) -> dict:
-    import httpx
+    import httpx2 as httpx  # 🐴: el cliente GUI es Qt; httpx2 queda solo para tests
     import uvicorn
     import websockets
 

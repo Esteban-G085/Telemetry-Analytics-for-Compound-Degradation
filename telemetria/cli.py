@@ -3,21 +3,20 @@
 Uso:
     python -m telemetria                       # abre la GUI de escritorio (PySide6)
     python -m telemetria gui                   # igual que arriba (interfaz nativa)
-    python -m telemetria app --modo seco       # abre la app local (navegador, modo seco)
-    python -m telemetria app --modo ac         # abre la app local (navegador, captura AC)
-    python -m telemetria app --sin-navegador   # solo el servidor (diagnostico)
     python -m telemetria pipeline              # pipeline offline de la Etapa 1
     python -m telemetria pipeline --entrada data/raw/sim_42.csv
 
 Si se omite el subcomando se asume `gui`, de modo que `python -m telemetria`
 abre la interfaz de escritorio nativa (equivale a `python -m telemetria gui`).
+
+🐴: se quitó el subcomando `app` (lanzador de navegador): solo existe la GUI nativa.
 """
 
 from __future__ import annotations
 
 import sys
 
-COMANDOS = ("gui", "app", "pipeline")
+COMANDOS = ("gui", "pipeline")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,15 +32,10 @@ def main(argv: list[str] | None = None) -> int:
 
         return gui_main(resto)
 
-    if comando == "pipeline":
-        from telemetria.pipeline.orquestador import main as pipeline_main
+    from telemetria.pipeline.orquestador import main as pipeline_main
 
-        pipeline_main(resto)
-        return 0
-
-    from telemetria.api.lanzador import main as app_main
-
-    return app_main(resto)
+    pipeline_main(resto)
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover

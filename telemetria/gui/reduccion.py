@@ -13,7 +13,7 @@ y la diferencia A − B siguen leyendo el mismo instante.
 
 from __future__ import annotations
 
-import math
+import numpy as np
 
 
 def presupuesto_puntos(
@@ -30,31 +30,6 @@ def presupuesto_puntos(
     return max(minimo, min(maximo, ancho * max(1, int(factor))))
 
 
-def _numero(valor) -> float:
-    """Valor finito para el cálculo; ``None``/NaN cuentan como 0."""
-    try:
-        numero = float(valor)
-    except (TypeError, ValueError):
-        return 0.0
-    return numero if math.isfinite(numero) else 0.0
-
-
-def _vector(series: dict[str, list], i: int) -> tuple[float, ...]:
-    return tuple(_numero(valores[i]) for valores in series.values())
-
-
-def _media(series: dict[str, list], inicio: int, fin: int) -> tuple[float, ...]:
-    n = fin - inicio
-    return tuple(
-        sum(_numero(valores[i]) for i in range(inicio, fin)) / n
-        for valores in series.values()
-    )
-
-
-def _distancia2(a: tuple[float, ...], b: tuple[float, ...]) -> float:
-    return sum((x - y) ** 2 for x, y in zip(a, b))
-
-
 def indice_lttb(x: list, series: dict[str, list], umbral: int) -> list[int]:
     """Índices representativos, ordenados, que conservan los picos.
 
@@ -67,29 +42,30 @@ def indice_lttb(x: list, series: dict[str, list], umbral: int) -> list[int]:
     if umbral >= longitud or umbral < 3 or longitud < 3:
         return list(range(longitud))
 
+    # NaN/None cuentan como 0 para el cálculo de áreas; las claves JSON no se
+    # tocan, solo se eligen índices.
+    matriz = np.column_stack(
+        [
+            np.nan_to_num(np.asarray(list(valores)[:longitud], dtype=float))
+            for valores in series.values()
+        ]
+    )
     seleccion = [0]
     tamano_cubo = (longitud - 2) / (umbral - 2)
     anterior = 0
     for cubo in range(umbral - 2):
-        inicio = int(math.floor(cubo * tamano_cubo)) + 1
-        fin = int(math.floor((cubo + 1) * tamano_cubo)) + 1
-        fin = min(fin, longitud - 1)
+        inicio = int(cubo * tamano_cubo) + 1
+        fin = min(int((cubo + 1) * tamano_cubo) + 1, longitud - 1)
         inicio = max(inicio, anterior + 1)
         if inicio >= fin:
             continue
 
-        media = _media(series, inicio, fin)
-        vector_anterior = _vector(series, anterior)
-        mejor = inicio
-        mejor_area = -1.0
-        for i in range(inicio, fin):
-            vector = _vector(series, i)
-            area = _distancia2(vector_anterior, vector) + _distancia2(
-                vector, media
-            )
-            if area > mejor_area:
-                mejor_area = area
-                mejor = i
+        bloque = matriz[inicio:fin]
+        vector_anterior = matriz[anterior]
+        areas = ((bloque - vector_anterior) ** 2).sum(axis=1) + (
+            (bloque - bloque.mean(axis=0)) ** 2
+        ).sum(axis=1)
+        mejor = inicio + int(np.argmax(areas))
         seleccion.append(mejor)
         anterior = mejor
 

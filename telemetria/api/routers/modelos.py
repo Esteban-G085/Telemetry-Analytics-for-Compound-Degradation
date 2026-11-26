@@ -109,34 +109,6 @@ async def sensores(entrada: EntradaSensores, cache: CacheMemoria = Depends(cache
 
 @router.get("/features")
 async def features(cache: CacheMemoria = Depends(cache_actual)) -> dict:
-    """Lista de features numericas del modelo (para los selectores de §3.2)."""
+    """Lista de features numéricas del modelo."""
     sesion = _sesion(cache)
     return {"features": analisis.lista_features(sesion)}
-
-
-@router.get("/dispersion")
-async def dispersion(
-    x: str,
-    y: str = "degradacion",
-    cache: CacheMemoria = Depends(cache_actual),
-) -> dict:
-    """Dispersion por vuelta de dos features (o de una vs. la degradacion)."""
-    sesion = _sesion(cache)
-    try:
-        return await run_in_threadpool(analisis.dispersion, sesion, x, y)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.get("/correlacion")
-async def correlacion(
-    features: str | None = None,
-    cache: CacheMemoria = Depends(cache_actual),
-) -> dict:
-    """Matriz de correlacion entre features y la degradacion."""
-    sesion = _sesion(cache)
-    lista = [f for f in (features or "").split(",") if f] or None
-    try:
-        return await run_in_threadpool(analisis.correlacion, sesion, lista)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc

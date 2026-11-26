@@ -409,6 +409,36 @@ class VistaReplay(VistaBase):
             return f"Valor ({unidades[0]})"
         return "Valor (" + ", ".join(unidades) + ") · normaliza para comparar"
 
+    # 🐴: un solo sitio para ejes, minimapa y encuadre del comparador: antes
+    # _dibujar_comparacion y _actualizar_eje_comparacion repetían lo mismo.
+    def _etiquetas_ejes_comparar(self, canales) -> None:
+        self.grafico_comparar.setLabel(
+            "left", self._etiqueta_y(list(canales), self.chk_normalizar.isChecked())
+        )
+        self.grafico_comparar.setLabel(
+            "bottom",
+            "Progreso de vuelta (%)"
+            if self.chk_progreso.isChecked()
+            else "Tiempo de vuelta (s)",
+        )
+
+    def _contexto_datos_comparar(self, canales) -> None:
+        self.contexto_comparar.establecer_datos(
+            self._x_comparar_visible,
+            self._y_comparar_visible.get(canales[0], []),
+            unidad="%" if self.chk_progreso.isChecked() else "s",
+            series=[self._y_comparar_visible.get(c, []) for c in canales[1:]],
+        )
+
+    def _encuadrar_x_comparar(self) -> None:
+        if not self._x_comparar_visible:
+            return
+        self.grafico_comparar.setXRange(
+            min(self._x_comparar_visible),
+            max(self._x_comparar_visible),
+            padding=0.02,
+        )
+
     def _limpiar_comparacion(self) -> None:
         for curva in list(self._curvas_comparar.values()):
             if self._leyenda_comparar is not None:
@@ -532,43 +562,19 @@ class VistaReplay(VistaBase):
 
     def _al_cambiar_normalizacion(self, _marcado=None) -> None:
         """La etiqueta y el cursor cambian al instante; datos aparte."""
-        self.grafico_comparar.setLabel(
-            "left",
-            self._etiqueta_y(
-                list(self._series_comparar), self.chk_normalizar.isChecked()
-            ),
-        )
+        self._etiquetas_ejes_comparar(self._series_comparar)
         self._actualizar_cursor_comparar()
 
     def _actualizar_eje_comparacion(self) -> None:
-        self.grafico_comparar.setLabel(
-            "bottom",
-            "Progreso de vuelta (%)"
-            if self.chk_progreso.isChecked()
-            else "Tiempo de vuelta (s)",
-        )
+        self._etiquetas_ejes_comparar(self._series_comparar)
         if not self._series_comparar:
             return
         self._x_comparar_visible = self._x_para_comparar(self._t_comparar)
         canales = list(self._series_comparar)
         # Primero se fijan los límites de la nueva unidad (s o %); si se
         # reencuadra antes, el rango viejo recorta los datos al redibujar.
-        self.contexto_comparar.establecer_datos(
-            self._x_comparar_visible,
-            self._y_comparar_visible.get(canales[0], []) if canales else [],
-            unidad="%" if self.chk_progreso.isChecked() else "s",
-            series=[
-                self._y_comparar_visible.get(c, []) for c in canales[1:]
-            ],
-        )
-        self.grafico_comparar.setXRange(
-            min(self._x_comparar_visible),
-            max(self._x_comparar_visible),
-            padding=0.02,
-        )
-        self.grafico_comparar.setLabel(
-            "left", self._etiqueta_y(canales, self.chk_normalizar.isChecked())
-        )
+        self._contexto_datos_comparar(canales)
+        self._encuadrar_x_comparar()
         self._redibujar_curvas_comparar()
         self._actualizar_cursor_comparar()
 
@@ -600,25 +606,9 @@ class VistaReplay(VistaBase):
         )
 
     def _encuadrar_comparacion(self) -> None:
-        if not self._x_comparar_visible:
-            return
-        self.grafico_comparar.setXRange(
-            min(self._x_comparar_visible),
-            max(self._x_comparar_visible),
-            padding=0.02,
-        )
+        self._encuadrar_x_comparar()
         self.grafico_comparar.enableAutoRange(axis="y")
         self._ocultar_cursor()
-
-    @property
-    def _linea_cursor(self):
-        """Compatibilidad: línea vertical del cursor compartido."""
-        return self._cursor_comparar._linea_v
-
-    @property
-    def _lectura_cursor(self):
-        """Compatibilidad: caja de lectura del cursor compartido."""
-        return self._cursor_comparar._texto
 
     def _formato_x_comparar(self, x: float, i: int) -> str:
         if self.chk_progreso.isChecked():
@@ -657,10 +647,6 @@ class VistaReplay(VistaBase):
     def _ocultar_cursor(self) -> None:
         self._cursor_comparar.ocultar()
 
-    def _mover_cursor_comparacion(self, pos) -> None:
-        """Alias conservado para pruebas y smoke; el cursor es compartido."""
-        self._cursor_comparar.mover(pos)
-
     def _dibujar_comparacion(self, datos: dict) -> None:
         t = list(datos.get("t") or [])
         series = datos.get("series") or {}
@@ -691,31 +677,14 @@ class VistaReplay(VistaBase):
             )
             self._curvas_comparar[canal] = curva
 
-        self.grafico_comparar.setLabel(
-            "left", self._etiqueta_y(canales, normalizar)
-        )
-        self.grafico_comparar.setLabel(
-            "bottom",
-            "Progreso de vuelta (%)"
-            if self.chk_progreso.isChecked()
-            else "Tiempo de vuelta (s)",
-        )
+        self._etiquetas_ejes_comparar(canales)
         self.grafico_comparar.setTitle(
             f"Vuelta {datos.get('lap', '?')} · {len(canales)} señales"
         )
         # Los límites del minimapa se fijan antes del encuadre para que el
         # padding no saque la vista del rango real de la vuelta.
-        self.contexto_comparar.establecer_datos(
-            self._x_comparar_visible,
-            self._y_comparar_visible.get(canales[0], []),
-            unidad="%" if self.chk_progreso.isChecked() else "s",
-            series=[self._y_comparar_visible.get(c, []) for c in canales[1:]],
-        )
-        self.grafico_comparar.setXRange(
-            min(self._x_comparar_visible),
-            max(self._x_comparar_visible),
-            padding=0.02,
-        )
+        self._contexto_datos_comparar(canales)
+        self._encuadrar_x_comparar()
         self._redibujar_curvas_comparar()
         self._actualizar_cursor_comparar()
 
@@ -731,8 +700,8 @@ class VistaReplay(VistaBase):
             return
         lap = int(texto)
         canal = self.combo_canal.currentData()
-        # Nunca mandar texto de error como parametro de la URL (httpx lo
-        # rechaza con 'Invalid non-printable ASCII character in URL').
+        # Nunca mandar texto de error como parámetro de la URL: el backend
+        # respondería 400 en vez de dibujar la señal elegida.
         canales_str = canal if canal in self._canales else None
         self.api.vuelta(
             lap=lap,

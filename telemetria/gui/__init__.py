@@ -5,9 +5,9 @@ de escritorio. El backend FastAPI se mantiene igual y esta GUI se conecta a
 sus endpoints REST y WebSocket como cualquier otro cliente.
 
 Estructura:
-    cliente_api.py   - Cliente REST (httpx) + WebSocket (QWebSocket)
+    cliente_api.py   - Cliente REST (QNetworkAccessManager) + WebSocket (QWebSocket)
     vista_base.py    - Clase base para todas las pestañas
-    vistas/          - Una pestaña por pantalla (sesiones, telemetria, etc.)
+    vistas/          - Una pestaña por pantalla (sesiones, espectro, etc.)
     ventana_principal.py - QMainWindow con barra de estado y pestañas
     main.py          - Punto de entrada: arranca backend + ventana
 """

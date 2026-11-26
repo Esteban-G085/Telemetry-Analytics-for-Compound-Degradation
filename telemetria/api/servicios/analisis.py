@@ -250,7 +250,7 @@ def columnas_de_sensor(columnas: list[str], canal: str, rueda: str | None = None
 
 
 # --------------------------------------------------------------------------
-# Dispersión y correlación de features (Vista 2, §3.2)
+# Features del modelo
 # --------------------------------------------------------------------------
 def lista_features(sesion: Sesion) -> list[str]:
     """Nombres de las features numericas que entran al modelo."""
@@ -258,99 +258,6 @@ def lista_features(sesion: Sesion) -> list[str]:
         return []
     _, cols = modelo.matriz_features(sesion.feats)
     return list(cols)
-
-
-def _agregar_por_vuelta(sesion: Sesion, nombre: str, verdad: pd.Series) -> tuple[list[int], list[float]]:
-    if nombre == "degradacion":
-        laps = [int(l) for l in verdad.index]
-        return laps, [float(verdad.get(l, np.nan)) for l in laps]
-    if nombre not in sesion.feats.columns:
-        raise ValueError(f"Feature desconocida: {nombre}")
-    agg = sesion.feats.groupby("lap")[nombre].mean()
-    laps = [int(l) for l in agg.index]
-    return laps, [float(v) for v in agg.to_numpy()]
-
-
-def dispersion(sesion: Sesion, x: str, y: str | None = None) -> dict:
-    """Dispersion por vuelta de dos features (o de una vs. la degradacion)."""
-    if sesion.feats.empty:
-        raise ValueError("La sesion no genero ventanas validas")
-    verdad = sesion.degradacion_vuelta()
-    laps_x, xs = _agregar_por_vuelta(sesion, x, verdad)
-    y = y or "degradacion"
-    laps_y, ys = _agregar_por_vuelta(sesion, y, verdad)
-    mapa_y = dict(zip(laps_y, ys))
-
-    px, py, laps = [], [], []
-    for lap, xv in zip(laps_x, xs):
-        yv = mapa_y.get(lap)
-        if yv is None or not (np.isfinite(xv) and np.isfinite(yv)):
-            continue
-        px.append(xv)
-        py.append(yv)
-        laps.append(lap)
-
-    corr = pendiente = intercepto = None
-    recta = None
-    if len(px) >= 3:
-        a = np.asarray(px, dtype=float)
-        b = np.asarray(py, dtype=float)
-        if a.std() > 0 and b.std() > 0:
-            corr = float(np.corrcoef(a, b)[0, 1])
-            pendiente, intercepto = (float(v) for v in np.polyfit(a, b, 1))
-            x0, x1 = float(a.min()), float(a.max())
-            recta = {"x": [x0, x1], "y": [pendiente * x0 + intercepto, pendiente * x1 + intercepto]}
-    return {
-        "x": x,
-        "y": y,
-        "laps": laps,
-        "px": px,
-        "py": py,
-        "n": len(px),
-        "corr": corr,
-        "pendiente": pendiente,
-        "intercepto": intercepto,
-        "recta": recta,
-    }
-
-
-def correlacion(sesion: Sesion, features: list[str] | None = None, max_features: int = 12) -> dict:
-    """Matriz de correlacion (por vuelta) entre features y la degradacion."""
-    if sesion.feats.empty:
-        raise ValueError("La sesion no genero ventanas validas")
-    cols = lista_features(sesion)
-    if features:
-        cols = [c for c in features if c in cols]
-    else:
-        # Una feature por familia (la de mayor |correlacion| con la degradacion),
-        # para no devolver una matriz gigante e ilegible.
-        verdad = sesion.degradacion_vuelta()
-        lap_deg = pd.Series({int(l): float(verdad.get(l, np.nan)) for l in sesion.feats["lap"].unique()})
-        por_familia: dict[str, tuple[float, str]] = {}
-        agg = sesion.feats.groupby("lap")[cols].mean()
-        for c in cols:
-            serie = agg[c]
-            fin = serie.notna() & lap_deg.reindex(serie.index).notna()
-            if fin.sum() < 3:
-                continue
-            r = abs(float(np.corrcoef(serie[fin], lap_deg.reindex(serie.index)[fin])[0, 1]))
-            if not np.isfinite(r):
-                continue
-            fam = c.split("_")[0]
-            if fam not in por_familia or r > por_familia[fam][0]:
-                por_familia[fam] = (r, c)
-        cols = [c for _, c in sorted(por_familia.values(), reverse=True)][:max_features]
-
-    verdad = sesion.degradacion_vuelta()
-    agg = sesion.feats.groupby("lap")[cols].mean()
-    agg["degradacion"] = [float(verdad.get(int(l), np.nan)) for l in agg.index]
-    etiquetas = list(agg.columns)
-    matriz = agg.corr().to_numpy(dtype=float)
-    return {
-        "etiquetas": etiquetas,
-        "matriz": [[None if not np.isfinite(v) else float(v) for v in fila] for fila in matriz],
-        "n": int(agg.shape[0]),
-    }
 
 
 def _ajustar_y_evaluar(

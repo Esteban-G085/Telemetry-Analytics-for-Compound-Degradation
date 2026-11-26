@@ -61,25 +61,11 @@ def vuelta(
     return _payload(sesion, lap, canales, crudo, max_puntos)
 
 
-@router.get("/stint")
-def stint(
-    canales: str | None = None,
-    crudo: bool = Query(False, description="Incluye la señal remuestreada cruda"),
-    max_puntos: int = Query(20000, ge=50, description="Reducción min/max si se supera"),
-    cache: CacheMemoria = Depends(cache_actual),
-) -> dict:
-    """Stint completo con min-max bucket downsampling (§3.1, Vista 1)."""
-    sesion = _sesion(cache)
-    return _payload(sesion, None, canales, crudo, max_puntos)
-
-
-def _payload(sesion, lap: int | None, canales: str | None, crudo: bool, max_puntos: int) -> dict:
-    """Construye el JSON de telemetría para una vuelta o para el stint entero."""
+def _payload(sesion, lap: int, canales: str | None, crudo: bool, max_puntos: int) -> dict:
+    """Construye el JSON de telemetría de una vuelta (D4)."""
     df = sesion.limpio
-    mascara_lap = (
-        df["lap"].to_numpy() == lap if lap is not None else np.ones(len(df), dtype=bool)
-    )
-    if lap is not None and not mascara_lap.any():
+    mascara_lap = df["lap"].to_numpy() == lap
+    if not mascara_lap.any():
         raise HTTPException(status_code=404, detail=f"Vuelta {lap} no existe en la sesión")
 
     cols = _parsear_canales(canales, df.columns)

@@ -6,7 +6,6 @@ from telemetria.gui.vistas.v_prediccion import VistaPrediccion
 from telemetria.gui.vistas.v_robustez import VistaRobustez
 from telemetria.gui.vistas.v_replay import VistaReplay
 from telemetria.gui.vistas.v_sesiones import VistaSesiones
-from telemetria.gui.vistas.v_telemetria import VistaTelemetria
 from telemetria.gui.vistas.v_vivo import VistaVivo
 
 __all__ = [
@@ -16,6 +15,5 @@ __all__ = [
     "VistaRobustez",
     "VistaReplay",
     "VistaSesiones",
-    "VistaTelemetria",
     "VistaVivo",
 ]

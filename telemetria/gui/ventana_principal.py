@@ -2,10 +2,12 @@
 
 QMainWindow con:
   * barra de estado que indica si el backend esta vivo,
-  * pestañas (una por vista: sesiones, telemetria, espectro, prediccion,
-    laboratorio, robustez, replay, vivo),
+  * pestañas (sesiones, espectro, predicción, taller, robustez, replay, vivo),
   * un panel superior de control de telemetria en vivo (conectar/desconectar WS),
   * estilos QSS para una apariencia pulida y profesional.
+
+🐴: se quitó la pestaña «Telemetria»: «En vivo» y `/health` cubren el estado
+visible sin duplicar el visor de canales.
 """
 
 from __future__ import annotations
@@ -14,7 +16,6 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -51,7 +52,6 @@ from telemetria.gui.vistas import (
     VistaRobustez,
     VistaReplay,
     VistaSesiones,
-    VistaTelemetria,
     VistaVivo,
 )
 
@@ -279,7 +279,6 @@ class VentanaPrincipal(QMainWindow):
         self.pestanas = QTabWidget()
         self.pestanas.setDocumentMode(True)
         self.pestanas.addTab(VistaSesiones(self.api), "Sesiones")
-        self.pestanas.addTab(VistaTelemetria(self.api), "Telemetria")
         self.pestanas.addTab(VistaEspectro(self.api), "Espectro")
         self.pestanas.addTab(VistaPrediccion(self.api), "Prediccion")
         self.pestanas.addTab(VistaLaboratorio(self.api), "Taller de modelos")
@@ -292,8 +291,8 @@ class VentanaPrincipal(QMainWindow):
 
         # El Taller concentra los parámetros; Predicción solo recalcula y
         # muestra resultados con lo que recibe de él.
-        self.pestanas.widget(4).parametros_cambiados.connect(
-            self.pestanas.widget(3).aplicar_parametros
+        self.pestanas.widget(3).parametros_cambiados.connect(
+            self.pestanas.widget(2).aplicar_parametros
         )
 
         # ------------------------------------------------------------------ Senales
@@ -348,27 +347,16 @@ class VentanaPrincipal(QMainWindow):
             tooltip("modo_archivo" if vivo else "modo_vivo")
         )
 
-        # Pestaña 1 (Telemetría) queda disponible en ambos modos: es la que
-        # muestra el gráfico, con grupos distintos según la fuente.
+        # En modo vivo solo queda accessible «En vivo»: las pestañas de
+        # archivo no mezclan fuentes.
         for indice in range(self.pestanas.count()):
-            permitida = indice in (1, 7) if vivo else (indice != 7)
+            permitida = indice == 6 if vivo else (indice != 6)
             self.pestanas.setTabEnabled(indice, permitida)
         if not self.pestanas.isTabEnabled(self.pestanas.currentIndex()):
-            self.pestanas.setCurrentIndex(7 if vivo else 0)
+            self.pestanas.setCurrentIndex(6 if vivo else 0)
 
         self.btn_conectar.setEnabled(vivo and not self._ws_conectado)
         self.btn_desconectar.setEnabled(vivo and self._ws_conectado)
-
-        telemetria = self.pestanas.widget(1)
-        grupos = {
-            "grupo_canales": not vivo,
-            "grupo_tiempo_real": vivo,
-            "grupo_ws": vivo,
-        }
-        for nombre, habilitado in grupos.items():
-            grupo = telemetria.findChild(QGroupBox, nombre)
-            if grupo is not None:
-                grupo.setEnabled(habilitado)
 
     # ------------------------------------------------------------------ Slots
     def _abrir_guia(self) -> None:

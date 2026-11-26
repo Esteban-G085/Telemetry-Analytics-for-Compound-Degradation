@@ -72,9 +72,6 @@ class VivoSesion:
             logger = LoggerVivo(self.dir_vivo, nombre)
             # CSV crudo: se suscribe a la fuente antes del acondicionador (A1/D7).
             nueva.suscribir_crudo(logger.registrar)
-            if fuente == "ac":
-                # En AC la verdad se deriva del grip en el motor (A5).
-                motor.logger = logger
 
             # Recien ahora se detiene la sesion anterior y se publica la nueva.
             self._detener_sin_lock()

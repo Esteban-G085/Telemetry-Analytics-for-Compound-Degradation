@@ -2,7 +2,11 @@
 
 Este proyecto cuenta ahora con una **ventana nativa de escritorio** en lugar del
 dashboard de navegador. El backend (FastAPI) se mantiene igual; la GUI es un
-cliente más que se conecta a sus endpoints REST y WebSocket.
+cliente más que se conecta a sus endpoints REST y WebSocket, sin dependencias
+HTTP externas: usa `QNetworkAccessManager` y `QWebSocket` de Qt.
+
+🐴: se quitó el lanzador de navegador, la pestaña «Telemetría», los endpoints
+de dispersión/correlación y `/stint`; la GUI cubre lo útil con siete pestañas.
 
 ## Arrancar la aplicación
 
@@ -58,13 +62,12 @@ corresponde, para que nunca parezca que puedes mezclar un CSV con datos en vivo:
 
 - **Modo archivo** (el inicial y el que se activa al cargar un CSV): las
   pestañas de archivo están disponibles, pero el botón **Conectar telemetría
-  (WS)** y la pestaña **En vivo** quedan desactivados. En **Telemetría** también
-  se desactivan el gráfico y el área de mensajes del WebSocket.
+  (WS)** y la pestaña **En vivo** quedan desactivados.
 - **Modo vivo**: se activa con el botón **Cambiar a modo vivo** o al iniciar una
-  captura. Quedan disponibles **Telemetría** y **En vivo**; las pestañas que
-  analizan archivos (**Sesiones**, **Espectro**, **Predicción**, **Taller de
-  modelos**, **Robustez** y **Replay**) se desactivan. Para volver, pulsa
-  **Cambiar a modo archivo**.
+  captura. Queda disponible solo **En vivo**; las pestañas que analizan
+  archivos (**Sesiones**, **Espectro**, **Predicción**, **Taller de modelos**,
+  **Robustez** y **Replay**) se desactivan. Para volver, pulsa **Cambiar a modo
+  archivo**.
 
 Esto es solo una separación de interfaz: no cambia ningún endpoint ni clave del
 backend.
@@ -97,8 +100,8 @@ no hay textos blancos sobre fondos claros.
   explicación más larga. Las claves internas (`throttle`, `wheel_slip_fl`, ...)
   siguen siendo las mismas en la API; solo cambia lo que se muestra.
 - **Columnas de contexto ocultas.** `timestamp_s` es el eje del tiempo y `lap`
-  es el agrupador de vueltas. Aparecen en la lista de canales de **Telemetría**,
-  pero no se ofrecen como «señal para dibujar» en **Espectro** ni en **Replay**.
+  es el agrupador de vueltas, por lo que no se ofrecen como «señal para dibujar»
+  en **Espectro** ni en **Replay**.
 - **Leyendas y colores.** Las gráficas de Espectro y Predicción llevan leyenda.
   En Replay, cada señal del comparador tiene un color fijo y distinto, asignado
   en el orden en que la marcaste (no por orden alfabético de la API).
@@ -155,14 +158,13 @@ comparador no pisa el gráfico de detalle.
 | `etiquetas_canales.py` | Traduce las claves de la API a nombres legibles y oculta las columnas de contexto. |
 | `glosario.py` | Definiciones únicas de MAE, RMSE, SNR, outlier, PSD, bandas, α, Q/R, calidad, progreso, diferencia, cursor y modos para tooltips y guía. |
 | `dialogo_ayuda.py` | «Guía rápida»: diálogo no modal con el paso a paso y el glosario. |
-| `cliente_api.py` | Cliente REST (httpx) + WebSocket (QWebSocket). Todas las peticiones van a un hilo de fondo y las vueltas se cachean por sesión/vuelta/canales. |
+| `cliente_api.py` | Cliente REST (`QNetworkAccessManager`) + WebSocket (`QWebSocket`) nativos de Qt, sin hilos propios; emite señales y cachea las vueltas por sesión/vuelta/canales. |
 | `reduccion.py` | Presupuesto de puntos según el ancho del gráfico y LTTB multicanal local para el zoom. No toca las claves JSON del backend. |
 | `graficas.py` | Ayudas de gráficas: minimapa con rango limitado a los datos y cursor compartido con posición, unidades y valores. |
 | `parametros.py` | Valores por defecto, etiquetas y explicaciones de features compartidas por el Taller y Predicción; conserva las claves del backend. |
-| `ventana_principal.py` | `QMainWindow`: barra de estado, aviso de modo, botón «Guía rápida», 8 pestañas con gating archivo/vivo y panel WS. |
+| `ventana_principal.py` | `QMainWindow`: barra de estado, aviso de modo, botón «Guía rápida», 7 pestañas con gating archivo/vivo y panel WS. |
 | `vistas/vista_base.py` | Clase base de todas las pestañas; provee el bloque de ayuda superior (`agregar_ayuda()`). |
 | `vistas/v_sesiones.py` | Lista de sesiones (CSV), cargar sesión, ver sesión activa. |
-| `vistas/v_telemetria.py` | Canales disponibles y área de gráfico (pyqtgraph). |
 | `vistas/v_espectro.py` | Espectro de Welch (crudo vs. limpio) por canal. |
 | `vistas/v_prediccion.py` | Solo resultados de Ridge y Kalman, métricas y cursor; recibe los parámetros desde el Taller. |
 | `vistas/v_laboratorio.py` | «Taller de modelos»: todos los parámetros (Q/R/monotonía y alpha), tabla antes/después de la configuración y features con tooltips. |
@@ -175,19 +177,16 @@ comparador no pisa el gráfico de detalle.
 | # | Pestaña | Qué muestra | Endpoints usados |
 |---|---------|-------------|------------------|
 | 1 | **Sesiones** | CSV disponibles, cargar sesión, sesión activa | `GET/POST /api/sesiones/*` |
-| 2 | **Telemetría** | Canales disponibles, gráfico base | `GET /api/telemetria/canales` |
-| 3 | **Espectro** | PSD de Welch por canal (crudo/limpio), bandas Baja/Media/Alta etiquetadas | `GET /api/telemetria/espectro` |
-| 4 | **Predicción** | Solo resultados: degradación estimada (Ridge, Kalman), error medio (MAE) y error grande (RMSE) | `POST /api/modelos/kalman/estimar`, `POST /api/modelos/ridge/ajustar` |
-| 5 | **Taller de modelos** | Parámetros centralizados (Q/R/monotonía y α), antes/después de la config y features explicadas | `GET/POST/DELETE /api/config`, `GET /api/modelos/features` |
-| 6 | **Robustez** | Error frente al ruido (SNR), error sin fallos y subida del error ↑ al desconectar sensores | `POST /api/modelos/robustez`, `POST /api/modelos/sensores` |
-| 7 | **Replay** | Comparador de varias señales (cursor, progreso %, diferencia A − B) + detalle crudo/limpio, outliers y tarjetas de calidad | `GET /api/telemetria/vuelta/{lap}` |
-| 8 | **En vivo** | Captura desde AC o CSV, estado, osciloscopio | `POST/GET /api/vivo/*` |
+| 2 | **Espectro** | PSD de Welch por canal (crudo/limpio), bandas Baja/Media/Alta etiquetadas | `GET /api/telemetria/espectro` |
+| 3 | **Predicción** | Solo resultados: degradación estimada (Ridge, Kalman), error medio (MAE) y error grande (RMSE) | `POST /api/modelos/kalman/estimar`, `POST /api/modelos/ridge/ajustar` |
+| 4 | **Taller de modelos** | Parámetros centralizados (Q/R/monotonía y α), antes/después de la config y features explicadas | `GET/POST/DELETE /api/config`, `GET /api/modelos/features` |
+| 5 | **Robustez** | Error frente al ruido (SNR), error sin fallos y subida del error ↑ al desconectar sensores | `POST /api/modelos/robustez`, `POST /api/modelos/sensores` |
+| 6 | **Replay** | Comparador de varias señales (cursor, progreso %, diferencia A − B) + detalle crudo/limpio, outliers y tarjetas de calidad | `GET /api/telemetria/vuelta/{lap}` |
+| 7 | **En vivo** | Captura desde AC o CSV, estado, osciloscopio | `POST/GET /api/vivo/*` |
 
 El panel superior permite conectar/desconectar el WebSocket de telemetría en
-tiempo real (`/ws/telemetria`), solo en **modo vivo**. En la pestaña
-**Telemetría** hay un área de texto que muestra los mensajes del WS (control,
-ping/pong, tramas binarias decodificadas) y el gráfico se actualiza cuando
-llegan datos binarios. En modo archivo ambos quedan desactivados a propósito.
+tiempo real (`/ws/telemetria`), solo en **modo vivo**; en modo archivo queda
+desactivado a propósito.
 
 En la pestaña **En vivo**, al iniciar una captura se abre automáticamente el
 WebSocket `/api/vivo/stream`, que empuja JSON tipo `vivo` cada ~100 ms con el
@@ -197,15 +196,17 @@ estado del motor y la ventana reciente para el osciloscopio en tiempo real.
 
 - **PySide6** (LGPL, open source): widgets de ventana nativa.
 - **pyqtgraph**: gráficos rápidos para señales de telemetría.
-- **httpx**: cliente HTTP para llamar al backend FastAPI.
+- **QNetworkAccessManager**: peticiones REST nativas de Qt, asíncronas, sin
+  cliente HTTP externo.
 - **QWebSocket**: WebSocket nativo de Qt para datos en tiempo real.
 
 ## Qué se reutiliza del proyecto original
 
 Todo el backend (`telemetria/api/`, FastAPI), el pipeline de procesamiento
 (`telemetria/pipeline/`) y la captura en vivo (`telemetria/adquisicion/`)
-quedan intactos. Solo se reemplaza el frontend del navegador por esta GUI de
-escritorio.
+quedan intactos en sus claves JSON; solo se reemplaza el frontend del navegador
+por esta GUI de escritorio. Los únicos endpoints retirados son los que nadie
+usaba (`/stint`, dispersión y correlación).
 
 ## Comprobación rápida
 
@@ -213,9 +214,9 @@ escritorio.
 .venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider
 ```
 
-**179 tests** en total, de los cuales **32** son de humo de la GUI en modo
+**183 tests** en total, de los cuales **35** son de humo de la GUI en modo
 `offscreen`. Comprueban que arranca sin sesión, que se refresca al cargar una,
-que las 8 pestañas tienen ayuda visible, que los selectores usan nombres
+que las 7 pestañas tienen ayuda visible, que los selectores usan nombres
 amables y ocultan las columnas de contexto, y que el comparador de Replay
 dibuja varias señales (también normalizadas). También cubren la **Guía rápida**,
 las tarjetas de calidad de Replay, las cabeceras claras de métricas y las

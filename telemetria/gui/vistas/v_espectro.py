@@ -288,7 +288,7 @@ class VistaEspectro(VistaBase):
         texto = str(mensaje)
         if "422" in texto:
             # El backend devuelve 422 cuando la vuelta no tiene muestras
-            # suficientes; el texto crudo de httpx no ayuda al usuario.
+            # suficientes; el texto crudo del servidor no ayuda al usuario.
             aviso = "Esa vuelta no tiene muestras suficientes. Elige otra o 'Todas'."
         else:
             aviso = error_amigable(texto)

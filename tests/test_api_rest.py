@@ -167,15 +167,6 @@ def test_cargar_archivo_inexistente_404(cliente):
     assert r.status_code == 404
 
 
-def test_stint_endpoint(cliente):
-    j = cliente.get("/api/telemetria/stint", params={"max_puntos": 300}).json()
-    assert j["lap"] is None
-    assert j["downsample"] is True
-    assert len(j["t"]) <= 300
-    for canal, valores in j["series"].items():
-        assert len(valores) == len(j["t"]), canal
-
-
 def test_robustez_snr(cliente):
     r = cliente.post("/api/modelos/robustez", json={"snr_db": [40.0, 20.0, 0.0]})
     assert r.status_code == 200

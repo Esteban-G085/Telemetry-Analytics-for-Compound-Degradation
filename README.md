@@ -6,7 +6,7 @@ pensado para Assetto Corsa (AC).
 - **Etapa 1 — pipeline offline:** limpieza → features → modelos → evaluación →
   reporte, trabajando sobre CSV. Valida toda la lógica antes de añadir complejidad.
 - **Etapa 2 — backend + interfaz:** un backend **FastAPI** (REST + WebSocket)
-  que expone el pipeline de la Etapa 1 y una **GUI nativa PySide6** con 8 pestañas
+  que expone el pipeline de la Etapa 1 y una **GUI nativa PySide6** con 7 pestañas
   para inspeccionarlo y ajustar hiperparámetros sin recargar.
 - **Etapa 3 — tiempo real:** captura desde la **memoria compartida de AC**, un
   acondicionador **causal** que filtra y decima a 100 Hz, un motor de análisis en
@@ -21,7 +21,7 @@ El diseño está en [`docs/plan_etapa1.md`](docs/plan_etapa1.md),
 | Etapa | Qué es | Estado |
 |---|---|---|
 | **1 · Pipeline offline** | Limpieza, features, Ridge y Kalman sobre CSV (fuente simulada F1). | Implementada |
-| **2 · Interfaz** | Backend REST + WebSocket que envuelve el pipeline; GUI PySide6 (8 pestañas) | **Implementada** |
+| **2 · Interfaz** | Backend REST + WebSocket que envuelve el pipeline; GUI PySide6 (7 pestañas) | **Implementada** |
 | **3 · Tiempo real** | Captura desde AC (memoria compartida) y predicción en ventana deslizante; app local con ventana nativa PySide6. | **Implementada** |
 
 La Etapa 1 ya está preparada para la 3: las features se calculan **por ventana**,
@@ -81,7 +81,7 @@ PROYECTO/
 │   │   └── motor_vivo.py     # motor de análisis en ventana deslizante + logger CSV
 │   └── api/                  # Etapas 2 y 3: backend FastAPI (envuelve el pipeline)
 │       ├── app.py            # instancia FastAPI y CORS (la GUI es otro cliente)
-│       ├── lanzador.py       # arranca uvicorn en un hilo (y el modo navegador legado)
+│       ├── lanzador.py       # arranca uvicorn en un hilo para la GUI
 │       ├── respuestas.py     # respuesta JSON rápida (orjson)
 │       ├── dependencias.py   # inyección de la caché y de la sesión en vivo
 │       ├── routers/          # sesiones, telemetria, modelos, configuracion, vivo
@@ -92,22 +92,22 @@ PROYECTO/
 │           ├── vivo.py                # orquesta fuente + bus + motor + logger
 │           ├── analisis.py            # Ridge, Kalman, espectro, robustez
 │           └── serializacion.py       # numpy -> JSON/Float32
-│   └── gui/                  # interfaz nativa (PySide6): 8 pestañas
+│   └── gui/                  # interfaz nativa (PySide6): 7 pestañas
 │       ├── main.py           # arranca uvicorn en hilo + QApplication
 │       ├── ventana_principal.py  # modos archivo/vivo y barra de estado
 │       ├── etiquetas_canales.py  # nombres legibles y columnas de contexto ocultas
 │       ├── glosario.py       # definiciones de métricas y modos para tooltips
 │       ├── parametros.py     # defaults y etiquetas compartidas Taller/Predicción
 │       ├── dialogo_ayuda.py  # «Guía rápida» no modal
-│       ├── cliente_api.py    # REST (httpx) + WS (QWebSocket) en hilos de fondo
+│       ├── cliente_api.py    # REST (QNetworkAccessManager) + WS (QWebSocket), señales Qt
 │       ├── reduccion.py      # presupuesto adaptativo + LTTB local para gráficas
 │       ├── graficas.py       # minimapa limitado, rango visible y cursor común
-│       └── vistas/           # sesiones, telemetria, espectro, prediccion,
+│       └── vistas/           # sesiones, espectro, predicción,
 │                             # taller, robustez, replay, vivo
 ├── data/
 │   ├── raw/                  # CSV crudos + *_verdad.csv (verdad simulada)
 │   ├── processed/            # señal limpia (csv.gz), importancias.csv, modelo_ridge.joblib
-│   ├── vivo/                 # capturas en vivo (crudo + _verdad.csv)
+│   ├── vivo/                 # capturas en vivo (CSV crudo)
 │   └── reports/              # reporte HTML autocontenido
 └── tests/                    # tests de Python (pipeline, API y GUI offscreen)
 ```
@@ -153,15 +153,12 @@ python -m uvicorn telemetria.api.app:app --host 127.0.0.1 --port 8000
 | `POST /api/sesiones/subir` | Carga un CSV subido (drag & drop, multipart `archivo`). |
 | `GET /api/telemetria/canales` | Canales disponibles y físicos. |
 | `GET /api/telemetria/vuelta/{lap}` | Arrays planos `t` + canales de una vuelta (`canales`, `crudo`, `max_puntos`). |
-| `GET /api/telemetria/stint` | Stint completo con min-max bucket downsampling. |
 | `GET /api/telemetria/espectro` | PSD de Welch (crudo vs. limpio) en dB/Hz (`canal`, `lap`, `nperseg`). |
 | `POST /api/modelos/kalman/estimar` | Filtro de Kalman (`q_nivel`, `q_pendiente`, `r`, `monotono`) + bandas. |
 | `POST /api/modelos/ridge/ajustar` | Fija `alpha` (o usa CV) y `excluir`; re-entrena y devuelve métricas e importancias. |
 | `POST /api/modelos/robustez` | MAE de Ridge frente a ruido inyectado (`snr_db`). |
 | `POST /api/modelos/sensores` | Simulador de fallo de sensores: MAE de Ridge al desconectar canales (`caidos`). |
-| `GET /api/modelos/features` | Lista de features numéricas del modelo (selectores de §3.2). |
-| `GET /api/modelos/dispersion` | Dispersión por vuelta de dos features (o una vs. la degradación) + ajuste. |
-| `GET /api/modelos/correlacion` | Matriz de correlación (por vuelta) entre features y la degradación. |
+| `GET /api/modelos/features` | Lista de features numéricas del modelo. |
 | `GET /api/config` | Configuración activa en JSON. |
 | `POST /api/config` | Aplica overrides anidados sobre `config.yaml`. |
 | `DELETE /api/config` | Restablece a los valores de fábrica. |
@@ -200,8 +197,10 @@ Flujo: `Fuente` (memoria de AC o CSV) → `BusTiempoReal` → `AcondicionadorCau
 (outliers causales + IIR SOS 20 Hz + decimación a 100 Hz) → `MotorVivo` (features
 en ventana deslizante + Kalman; **Ridge no interviene en vivo**) → `LoggerVivo`
 (CSV **crudo**, antes del acondicionador, con el esquema del proyecto + columnas
-extra `packetId`, `grip_*` y `degradacion`, y `<nombre>_verdad.csv` si hay
-etiqueta) → WebSocket a ~10 Hz.
+extra `packetId`, `grip_*` y `degradacion`) → WebSocket a ~10 Hz.
+
+🐴: el logger ya no escribe un `<nombre>_verdad.csv` aparte: el CSV crudo es
+la única captura y la degradación se recalcula desde él en batch.
 
 Robustez operativa: los suscriptores del bus y de la fuente se aíslan con
 `try/except` (un fallo no tumba la captura), `FuenteVivo` cuenta los `packetId`
@@ -224,8 +223,8 @@ bien.
 ### WebSocket `/api/vivo/stream`
 
 El servidor empuja una trama JSON cada ~100 ms con `tipo: "vivo"`: `n`, `lap`,
-`grip.<rueda>`, `degradacion.<rueda>`, `degradacion_modo`, `prediccion` (agregada +
-`por_rueda`), la `ventana` (t + series) y el `espectro` de la ventana. El cliente
+`grip.<rueda>`, `degradacion.<rueda>`, `degradacion_media`, `degradacion_modo`,
+`prediccion` (agregada), la `ventana` (t + series) y el `espectro` de la ventana. El cliente
 puede enviar `{"canales": [...], "n": 200}` para elegir qué ventana recibe y
 `{"tipo": "ping"}`.
 
@@ -235,13 +234,14 @@ puede enviar `{"canales": [...], "n": 200}` para elegir qué ventana recibe y
 python -m telemetria                    # abre la GUI (uvicorn en hilo + ventana nativa)
 python -m telemetria gui                # equivalente, explicito
 python -m telemetria pipeline           # solo el pipeline offline
-python -m telemetria app --sin-navegador  # legado: solo el servidor (diagnóstico)
 ```
 
 `telemetria/gui/main.py` levanta `uvicorn` en un hilo, espera a `/health` y abre
 la ventana PySide6. Doble clic en `ejecutar_app.bat` hace lo mismo sin escribir
-comandos. El subcomando `app` es el antiguo lanzador de navegador y queda como
-diagnóstico; no abre interfaz porque el frontend Vite/uPlot ya no está incluido.
+comandos.
+
+🐴: se quitó el subcomando `app` (antiguo lanzador de navegador): solo existe
+la GUI nativa, así que no hay modo «solo servidor» ni interfaz web.
 
 ## Uso — Interfaz de escritorio (GUI)
 
@@ -256,18 +256,20 @@ Flujo normal: abrir la pestaña **Sesiones**, elegir un CSV de `data/raw/` y pul
 **Cargar sesión seleccionada**. Al cargar, las demás pestañas se recargan solas.
 Antes de cargar una sesión muestran «Sin sesión activa» en lugar de errores HTTP.
 
-### Las ocho pestañas
+### Las siete pestañas
 
 | # | Pestaña | Qué muestra |
 |---|---|---|
 | 1 | **Sesiones** | Lista de CSV, carga de sesión y resumen (vueltas, muestras). |
-| 2 | **Telemetría** | Canales disponibles, gráfico de tramas binarias del WS y mensajes de control. |
-| 3 | **Espectro** | PSD de Welch (crudo vs. limpio) del canal y vuelta elegidos, con bandas Baja/Media/Alta etiquetadas. |
-| 4 | **Predicción** | Solo resultados: verdad/proxy, Ridge y Kalman por vuelta, tabla de error medio (MAE) y error grande (RMSE). |
-| 5 | **Taller de modelos** | Todos los parámetros (Q/R/monotonía y α), tabla antes/después de la configuración y features explicadas. |
-| 6 | **Robustez** | Error frente al ruido (SNR), error sin fallos y subida del error ↑ al desconectar sensores. |
-| 7 | **Replay** | Comparador de varias señales de una vuelta (cursor, progreso %, diferencia A − B, minimapa y ejes con unidades) + detalle crudo/limpio, outliers y tarjetas de calidad. |
-| 8 | **En vivo** | Captura AC/modo seco, estado del motor y osciloscopio del WS de vivo. |
+| 2 | **Espectro** | PSD de Welch (crudo vs. limpio) del canal y vuelta elegidos, con bandas Baja/Media/Alta etiquetadas. |
+| 3 | **Predicción** | Solo resultados: verdad/proxy, Ridge y Kalman por vuelta, tabla de error medio (MAE) y error grande (RMSE). |
+| 4 | **Taller de modelos** | Todos los parámetros (Q/R/monotonía y α), tabla antes/después de la configuración y features explicadas. |
+| 5 | **Robustez** | Error frente al ruido (SNR), error sin fallos y subida del error ↑ al desconectar sensores. |
+| 6 | **Replay** | Comparador de varias señales de una vuelta (cursor, progreso %, diferencia A − B, minimapa y ejes con unidades) + detalle crudo/limpio, outliers y tarjetas de calidad. |
+| 7 | **En vivo** | Captura AC/modo seco, estado del motor y osciloscopio del WS de vivo. |
+
+🐴: se quitó la pestaña «Telemetría»: el estado en vivo ya se ve en «En vivo»
+y `/health`, y el visor de canales duplicaba a Replay.
 
 Cada pestaña lleva arriba un bloque «Qué estás viendo» siempre visible. El botón
 **Guía rápida** de la barra superior abre un diálogo no modal con el flujo básico
@@ -305,21 +307,21 @@ vivo. En la pestaña **En vivo**, al iniciar una captura se abre automáticament
 python -m pytest -q
 ```
 
-**179 tests** de Python en verde (incluidos 32 de humo de la GUI en modo `offscreen`).
+**183 tests** de Python en verde (incluidos 35 de humo de la GUI en modo `offscreen`).
 Cobertura por área:
 
 | Fichero | Qué cubre |
 |---|---|
 | `tests/test_limpieza.py`, `test_features.py`, `test_etiquetas.py`, `test_modelo.py`, `test_evaluacion.py`, `test_generador.py`, `test_reporte.py`, `test_pipeline.py` | Etapa 1 (53 tests). |
-| `tests/test_api_rest.py` | Endpoints REST: arrays alineados, downsampling, crudo vs. limpio, 404/400/422, subida de CSV, robustez, stint, reset de config. |
+| `tests/test_api_rest.py` | Endpoints REST: arrays alineados, downsampling, crudo vs. limpio, 404/400/422, subida de CSV, robustez, reset de config. |
 | `tests/test_api_ws.py` | WebSocket: control, tramas binarias. |
 | `tests/test_coherencia_api.py` | La API reproduce **exactamente** el pipeline de `telemetria.pipeline` (Ridge por CV y Kalman con los Q/R de `config.yaml`), el PSD de Welch y los MAE de referencia de `sim_42.csv`. |
 | `tests/test_rendimiento.py` | Latencia y tramas contra un servidor **`uvicorn` real** (el `TestClient` no mide red). |
-| `tests/test_api_modelos_extra.py` | Extras §3.2/§3.5: features, dispersión, correlación y simulador de fallo de sensores. |
+| `tests/test_api_modelos_extra.py` | Extras §3.5: lista de features y simulador de fallo de sensores. |
 | `tests/test_ac_info.py` | Offsets/tamaños de los structs de AC y el camino «AC no está publicando». |
 | `tests/test_acondicionador.py` | Decimación a la frecuencia objetivo, atenuación del filtro y outliers causales. |
 | `tests/test_fuentes.py` | `BusTiempoReal` y `FuenteCSV` (decimación, esquema y verdad inyectada). |
-| `tests/test_motor_vivo.py` | Degradación desde grip auto-calibrado, predicción Kalman (agregada y **por rueda**) y logger CSV. |
+| `tests/test_motor_vivo.py` | Degradación agregada desde grip o columna inyectada, predicción Kalman agregada y logger CSV. |
 | `tests/test_vivo_api.py` | Endpoints `/api/vivo/*` y el WebSocket `/api/vivo/stream` (incluye detener bajo carga). |
 | `tests/test_coherencia_live_batch.py` | **D14**: la ruta en vivo (outliers causales + filtro + decimación) reproduce la señal del pipeline batch con correlación > 0.97. Incluye el reprocesado del **CSV crudo** del logger en batch (logger → batch, A1/C/D4). |
 | `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay (orden estable, normalización, progreso %, diferencia A − B, cursor, encuadre, minimapa limitado, rango visible, unidades de ejes, presupuesto adaptativo, zoom sin petición y caché); también cubre los modos archivo/vivo, el Taller de modelos, el cursor en Espectro/Predicción, la «Guía rápida», las tarjetas de calidad, las cabeceras claras de métricas y las etiquetas de bandas. |
@@ -445,9 +447,9 @@ para que reflejen incertidumbre real.
 El backend, la GUI de escritorio y el lanzador están completos:
 
 - [x] **Backend** (`telemetria/api/`, FastAPI REST + WebSocket).
-- [x] **GUI** (`telemetria/gui/`, PySide6 + pyqtgraph): las **ocho pestañas** —
-      1 sesiones, 2 telemetría, 3 espectro, 4 predicción, 5 taller de modelos,
-      6 robustez, 7 replay, 8 en vivo. Con ayuda siempre visible, nombres
+- [x] **GUI** (`telemetria/gui/`, PySide6 + pyqtgraph): las **siete pestañas** —
+      1 sesiones, 2 espectro, 3 predicción, 4 taller de modelos,
+      5 robustez, 6 replay, 7 en vivo. Con ayuda siempre visible, nombres
       legibles para las señales, comparador multi-señal en Replay con minimapa
       y zoom limitados en X e Y, ejes con unidades, cursor en
       Replay/Espectro/Predicción, Espectro restringido a canales de
@@ -460,14 +462,14 @@ El backend, la GUI de escritorio y el lanzador están completos:
 - [x] **Streaming** servidor→cliente: implementado en la Etapa 3
       (`/api/vivo/stream`), conectado al osciloscopio de la pestaña «En vivo».
 
-Extras del plan §3.2 y §3.5:
+Extras del plan §3.5:
 
-- [x] **Dispersión/correlación de features** (§3.2): disponible en la API
-      (`GET /api/modelos/dispersion` y `GET /api/modelos/correlacion`). La GUI
-      actual no tiene un panel dedicado para esta nube de puntos.
 - [x] **Simulador de fallo de sensores** (§3.5): pestaña **Robustez**, con
       canales × rueda y el MAE de Ridge con/sin cada fallo; endpoint
       `POST /api/modelos/sensores`.
+
+🐴: se quitaron los extras de dispersión/correlación (§3.2): la nube de puntos
+no tenía panel en la GUI y sus dos endpoints no los usaba nadie.
 
 Queda como mejora opcional la **validación visual a 60 FPS con 360k muestras**;
 el pipeline y la API ya están cubiertos por tests de rendimiento y coherencia.

@@ -161,21 +161,3 @@ def test_referencia_documentada_sim_42(cliente_sim42):
     kalman = cliente_sim42.post("/api/modelos/kalman/estimar", json={}).json()
     assert kalman["metricas"]["mae"] == pytest.approx(0.0197, abs=5e-4)
     assert kalman["cobertura"] == pytest.approx(1.00, abs=1e-6)
-
-
-def test_stint_completo_recortado(cliente_sim42):
-    """El stint entero (211k muestras) viaja recortado a max_puntos (§3.1)."""
-    import time
-
-    t0 = time.perf_counter()
-    j = cliente_sim42.get(
-        "/api/telemetria/stint", params={"max_puntos": 5000}
-    ).json()
-    transcurrido = time.perf_counter() - t0
-
-    assert j["lap"] is None
-    assert j["downsample"] is True
-    assert j["n"] <= 5000
-    assert len(j["t"]) == len(j["series"]["speed_kmh"])
-    assert j["n_total"] > 200_000  # el stint real se reduce ~42x
-    assert transcurrido < 2.0  # sin bloquear el event loop de forma notable
