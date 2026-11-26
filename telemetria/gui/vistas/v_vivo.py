@@ -17,6 +17,8 @@ y el osciloscopio en tiempo real con los datos del WebSocket.
 
 from __future__ import annotations
 
+import math
+
 import pyqtgraph as pg
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
@@ -30,6 +32,13 @@ from PySide6.QtWidgets import (
 )
 
 from telemetria.gui.cliente_api import ApiClient
+from telemetria.gui.etiquetas_canales import etiqueta_canal, unidad_canal
+from telemetria.gui.glosario import tooltip
+from telemetria.gui.graficas import (
+    ContextoZoom,
+    CursorGrafico,
+    limites_visualizacion,
+)
 from telemetria.gui.vistas.vista_base import VistaBase, error_amigable
 
 
@@ -39,6 +48,7 @@ class VistaVivo(VistaBase):
     def __init__(self, api: ApiClient, parent=None) -> None:
         super().__init__(api, parent)
         self._construir_ui()
+        self._cursor = CursorGrafico(self.grafico)
         self._conectar_senales()
 
         self._timer_estado = QTimer(self)
@@ -105,9 +115,19 @@ class VistaVivo(VistaBase):
         self.grafico.setLabel("bottom", "Muestra")
         self.grafico.showGrid(x=True, y=True)
         self.grafico.setTitle("Esperando datos del WebSocket...")
+        self.grafico.setToolTip(tooltip("cursor"))
         self.curva = self.grafico.plot(pen=pg.mkPen("#00bfa5", width=2))
         self.grafico.setMinimumHeight(300)
         lay_o.addWidget(self.grafico)
+
+        # El WebSocket empuja una ventana nueva cada ~100 ms. La navegación
+        # sirve para inspeccionar esa ventana sin pedir datos ni perder el
+        # contexto; no hace falta minimapa porque la curva ya es la ventana.
+        self.contexto = ContextoZoom(
+            self.grafico, rotulo="Ventana", con_minimapa=False
+        )
+        self.contexto.btn_ver_todo.setText("Ver toda la ventana")
+        lay_o.addWidget(self.contexto)
         grp_osc.setLayout(lay_o)
         layout.addWidget(grp_osc, stretch=1)
 
@@ -206,6 +226,17 @@ class VistaVivo(VistaBase):
             )
         elif estado == "desconectado":
             self.grafico.setTitle("WebSocket de vivo: desconectado")
+            self.curva.clear()
+            self._cursor.establecer_datos([], {})
+            self.contexto.establecer_datos([], [])
+
+    @staticmethod
+    def _numero(valor) -> float | None:
+        try:
+            numero = float(valor)
+        except (TypeError, ValueError):
+            return None
+        return numero if math.isfinite(numero) else None
 
     def _on_mensaje_vivo(self, datos: dict) -> None:
         if datos.get("tipo") != "vivo":
@@ -213,12 +244,54 @@ class VistaVivo(VistaBase):
 
         ventana = datos.get("ventana", {})
         series = ventana.get("series", {})
-        if series:
-            nombre = next(iter(series))
-            valores = series[nombre]
-            if valores:
-                self.curva.setData(valores)
-                self.grafico.setTitle(f"Osciloscopio en vivo - {nombre}")
+        if not series:
+            return
+
+        nombre = next(iter(series))
+        valores = series[nombre] or []
+        tiempos = ventana.get("t") or []
+        con_tiempo = len(tiempos) == len(valores)
+
+        pares: list[tuple[float, float]] = []
+        for indice, valor in enumerate(valores):
+            y = self._numero(valor)
+            if y is None:
+                continue
+            x = self._numero(tiempos[indice]) if con_tiempo else float(indice)
+            if x is None:
+                continue
+            pares.append((x, y))
+        if not pares:
+            return
+
+        x = [par[0] for par in pares]
+        y = [par[1] for par in pares]
+        self.curva.setData(x, y)
+
+        etiqueta = etiqueta_canal(nombre)
+        unidad = unidad_canal(nombre)
+        self.grafico.setTitle(f"Osciloscopio en vivo · {etiqueta}")
+        self.grafico.setLabel(
+            "left", f"Valor ({unidad})" if unidad else "Valor"
+        )
+        self.grafico.setLabel("bottom", "Tiempo (s)" if con_tiempo else "Muestra")
+
+        self._cursor.establecer_datos(
+            x,
+            {etiqueta: y},
+            unidades={etiqueta: unidad} if unidad else None,
+            formato_x=(
+                (lambda valor, _i: f"t = {valor:.3f} s")
+                if con_tiempo
+                else (lambda valor, _i: f"Muestra {int(round(valor))}")
+            ),
+        )
+        self.contexto.establecer_datos(
+            x,
+            y,
+            unidad="s" if con_tiempo else "",
+            y_limites=limites_visualizacion(y),
+        )
 
     def _llenar_archivos(self, sesiones: list) -> None:
         # GET /api/vivo/sesiones devuelve [{"nombre": ..., "kb": ..., ...}],

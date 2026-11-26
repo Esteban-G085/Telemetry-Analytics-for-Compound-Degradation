@@ -952,3 +952,174 @@ def test_taller_centraliza_parametros_y_prediccion_solo_resultados(
     ]
     assert any(fila[0] == "Ridge · alpha" and fila[1] == "0.5" for fila in filas)
     assert any(fila[0] == "Kalman · nivel (Q)" and fila[1] == "0.0002" for fila in filas)
+
+
+def test_cursor_marca_muestra_real_y_caja_no_se_corta(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(5)
+    api.vuelta_comparar_recibida.emit(
+        {
+            "lap": 1,
+            "t": [0.0, 1.0, 2.0],
+            "series": {
+                "throttle": [10.0, 20.0, 30.0],
+                "brake": [100.0, 200.0, 300.0],
+            },
+        }
+    )
+
+    cursor = replay._cursor_comparar
+    rect = replay.grafico_comparar.plotItem.sceneBoundingRect()
+    cursor.mover(rect.center())
+
+    assert cursor._linea_v.isVisible() and cursor._linea_h.isVisible()
+    assert cursor._punto.isVisible() and cursor._texto.isVisible()
+    assert cursor.punto_actual[1] == pytest.approx(20.0)
+
+    # Una esquina fuerza a la caja a cambiar de lado; nunca debe salirse.
+    esquina = rect.topRight() + QPointF(-3.0, 3.0)
+    cursor.mover(esquina)
+    caja = cursor._texto.sceneBoundingRect()
+    assert caja.left() >= rect.left() - 1
+    assert caja.right() <= rect.right() + 1
+    assert caja.top() >= rect.top() - 1
+    assert caja.bottom() <= rect.bottom() + 1
+
+
+def test_barra_herramientas_navega_y_no_se_sale_de_los_datos(ventana, api) -> None:
+    import pyqtgraph as pg
+
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(5)
+    n = 3000
+    api.vuelta_comparar_recibida.emit(
+        {
+            "lap": 1,
+            "t": [float(i) for i in range(n)],
+            "series": {"throttle": [float(i % 100) for i in range(n)]},
+        }
+    )
+
+    contexto = replay.contexto_comparar
+    barra = contexto.barra
+    vb = replay.grafico_comparar.plotItem.vb
+    for control in (
+        barra.btn_acercar,
+        barra.btn_alejar,
+        barra.btn_mover,
+        barra.btn_region,
+        barra.btn_restablecer,
+        barra.btn_ajustar,
+        barra.btn_auto,
+    ):
+        assert control.toolTip()
+
+    for _ in range(8):
+        barra.btn_acercar.click()
+    inicio, fin = vb.viewRange()[0]
+    ancho_zoom = fin - inicio
+    assert inicio >= 0.0 and fin <= n - 1
+    assert 0.0 < ancho_zoom < n - 1
+
+    for _ in range(8):
+        barra.btn_alejar.click()
+    inicio, fin = vb.viewRange()[0]
+    assert inicio >= 0.0 and fin <= n - 1
+    assert fin - inicio > ancho_zoom
+
+    barra.btn_region.click()
+    assert vb.state["mouseMode"] == pg.ViewBox.RectMode
+    barra.btn_mover.click()
+    assert vb.state["mouseMode"] == pg.ViewBox.PanMode
+
+    replay.grafico_comparar.setXRange(10.0, 20.0, padding=0)
+    barra.btn_restablecer.click()
+    inicio, fin = vb.viewRange()[0]
+    assert inicio == pytest.approx(0.0, abs=1)
+    assert fin == pytest.approx(n - 1, abs=1)
+
+
+def test_psd_con_suelo_no_se_ve_plana_pero_conserva_valores(ventana, api) -> None:
+    espectro = ventana.pestanas.widget(1)
+    api.espectro_recibido.emit(
+        {
+            "canal": "wheel_slip_fl",
+            "lap": 1,
+            "freqs": [0.0, 1.0, 2.0, 3.0],
+            "psd_limpio_db": [-10.0, -200.0, -200.0, -40.0],
+            "psd_crudo_db": [-5.0, -200.0, -200.0, -35.0],
+        }
+    )
+
+    abajo, arriba = espectro.grafico.plotItem.vb.viewRange()[1]
+    assert abajo > -100.0
+    assert arriba > abajo
+    assert -200.0 in espectro.curva_limpia.getData()[1]
+
+    espectro._cursor.mover(
+        espectro.grafico.plotItem.sceneBoundingRect().center()
+    )
+    assert "-200.00" in espectro._cursor.lectura
+
+
+def test_robustez_acumula_puntos_y_explica_estados(ventana, api) -> None:
+    robustez = ventana.pestanas.widget(4)
+    api.robustez_recibida.emit({"snr_db": [10.0], "mae": [0.15]})
+    assert len(robustez.curva_snr.getData()[0]) == 1
+    assert "SNR:" in robustez.contexto.lbl_rango.text()
+
+    api.robustez_recibida.emit(
+        {"snr_db": [-10.0, 0.0], "mae": [0.3, 0.2]}
+    )
+    assert len(robustez.curva_snr.getData()[0]) == 3
+
+    robustez.spin_snr.setValue(20.0)
+    robustez.btn_snr.click()
+    assert "Calculando" in robustez.lbl_estado_snr.text()
+    assert not robustez.btn_snr.isEnabled()
+    assert not robustez.progreso_snr.isHidden()
+
+    api.robustez_recibida.emit({"snr_db": [20.0], "mae": [0.12]})
+    x, y = robustez.curva_snr.getData()
+    assert len(x) == 4
+    assert (20.0, 0.12) in list(zip(x, y))
+    assert "Completado" in robustez.lbl_estado_snr.text()
+    assert robustez.btn_snr.isEnabled()
+
+    robustez.btn_snr.click()
+    api.error_robustez.emit("502 Bad Gateway")
+    assert len(robustez.curva_snr.getData()[0]) == 4
+    assert "Error al calcular" in robustez.lbl_estado_snr.text()
+    assert robustez.btn_snr.isEnabled()
+
+
+def test_vivo_dibuja_trama_ws_con_cursor_y_navegacion(ventana, api) -> None:
+    vivo = ventana.pestanas.widget(6)
+    api.mensaje_vivo.emit(
+        {
+            "tipo": "vivo",
+            "ventana": {
+                "t": [0.0, 1.0, 2.0],
+                "series": {"speed_kmh": [10.0, 20.0, 30.0]},
+            },
+        }
+    )
+
+    x, y = vivo.curva.getData()
+    assert x == pytest.approx([0.0, 1.0, 2.0])
+    assert y == pytest.approx([10.0, 20.0, 30.0])
+
+    vivo._cursor.mover(vivo.grafico.plotItem.sceneBoundingRect().center())
+    texto = vivo._cursor.lectura
+    assert "t =" in texto and "km/h" in texto
+
+    assert vivo.contexto.minimapa is None
+    assert "Ventana:" in vivo.contexto.lbl_rango.text()
+    for control in (
+        vivo.contexto.barra.btn_acercar,
+        vivo.contexto.barra.btn_mover,
+        vivo.contexto.barra.btn_region,
+    ):
+        assert control.toolTip()

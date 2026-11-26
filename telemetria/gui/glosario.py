@@ -113,6 +113,13 @@ GLOSARIO: dict[str, str] = {
         "o mando). Al normalizar, el eje pasa a 0–1 y la leyenda y el cursor "
         "recuerdan el valor original."
     ),
+    "zoom_in": "Acercar (+): reduce el rango visible alrededor del centro de la gráfica. La rueda del ratón hace lo mismo alrededor del puntero.",
+    "zoom_out": "Alejar (−): amplía el rango visible. Nunca se puede alejar más allá del conjunto completo de datos.",
+    "pan": "Mover: arrastra la gráfica para desplazarte por el rango de datos. Los límites impiden llegar a zonas vacías.",
+    "region": "Seleccionar región: arrastra sobre la gráfica para ampliar solo el rectángulo elegido.",
+    "restablecer": "Inicio: vuelve a la vista original con la que se cargaron los datos.",
+    "ajustar": "Ajustar: adapta ambos ejes a todas las muestras recibidas, con un margen pequeño.",
+    "auto_y": "Auto Y: escala el eje vertical automáticamente cuando cambian los datos. Desactívalo para conservar la escala actual.",
 }
 
 # (nombre visible, clave en GLOSARIO) para la guía rápida.
@@ -138,6 +145,8 @@ TERMINOS: tuple[tuple[str, str], ...] = (
     ("Modo vivo", "modo_vivo"),
     ("Rango visible y minimapa", "rango"),
     ("Unidades", "unidades"),
+    ("Navegación de gráficas", "pan"),
+    ("Zoom con límites", "zoom_in"),
 )
 
 

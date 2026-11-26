@@ -29,7 +29,7 @@ from telemetria.gui.etiquetas_canales import (
     filtrar_canales,
 )
 from telemetria.gui.glosario import tooltip
-from telemetria.gui.graficas import CursorGrafico
+from telemetria.gui.graficas import ContextoZoom, CursorGrafico, limites_psd
 from telemetria.gui.paleta import COLORES_BANDA, TEXTO
 from telemetria.gui.vistas.vista_base import VistaBase, error_amigable
 
@@ -45,6 +45,9 @@ class VistaEspectro(VistaBase):
         self._etiquetas_banda: list[pg.TextItem] = []
         self._construir_ui()
         self._cursor = CursorGrafico(self.grafico)
+        self.grafico.plotItem.vb.sigRangeChanged.connect(
+            self._actualizar_posiciones_bandas
+        )
         self._conectar_senales()
         # La lista de canales y el PSD dependen de la sesion activa.
 
@@ -105,13 +108,27 @@ class VistaEspectro(VistaBase):
         self.curva_cruda = self.grafico.plot(
             pen=pg.mkPen("r", width=1), name="Original"
         )
-        self.grafico.addLegend()
+        self.grafico.addLegend(offset=(8, 8))
         self.grafico.setToolTip(tooltip("psd"))
         self.grafico.setMinimumHeight(350)
+
+        self.contexto = ContextoZoom(
+            self.grafico,
+            rotulo="Frecuencia",
+            on_ver_todo=self._encuadrar_espectro,
+        )
+        self.lbl_info_psd = QLabel(
+            "Escala vertical: rango dinámico de 80 dB para no aplanar la señal; "
+            "los valores reales se leen en el cursor."
+        )
+        self.lbl_info_psd.setWordWrap(True)
+        self.lbl_info_psd.setToolTip(tooltip("psd"))
 
         grp_grafico = QGroupBox("Gráfico")
         lay_g = QVBoxLayout()
         lay_g.addWidget(self.grafico)
+        lay_g.addWidget(self.contexto)
+        lay_g.addWidget(self.lbl_info_psd)
         grp_grafico.setLayout(lay_g)
         layout.addWidget(grp_grafico, stretch=1)
 
@@ -204,11 +221,15 @@ class VistaEspectro(VistaBase):
         nperseg = self.spin_nperseg.value()
         self.api.espectro(canal=canal, lap=lap, nperseg=nperseg)
 
+    def _encuadrar_espectro(self) -> None:
+        """Vuelve a 0…Nyquist y al rango dinámico útil de la PSD."""
+        self.contexto._encuadrar()
+
     def _dibujar_espectro(self, datos: dict) -> None:
         # Claves reales de GET /api/telemetria/espectro (servicios/analisis.py).
-        freqs = datos.get("freqs", [])
-        limpia = datos.get("psd_limpio_db", [])
-        cruda = datos.get("psd_crudo_db") or []
+        freqs = list(datos.get("freqs", []))
+        limpia = list(datos.get("psd_limpio_db", []))
+        cruda = list(datos.get("psd_crudo_db") or [])
 
         self.curva_limpia.setData(freqs, limpia)
         self.curva_cruda.setData(freqs, cruda)
@@ -216,17 +237,39 @@ class VistaEspectro(VistaBase):
         if cruda:
             series["Original"] = cruda
         self._cursor.establecer_datos(
-            list(freqs),
+            freqs,
             series,
             unidades={nombre: "dB/Hz" for nombre in series},
             formato_x=lambda x, _i: f"{x:.2f} Hz",
         )
+
+        # El suelo de -200 dB del backend es solo protección numérica: se
+        # mantiene en los datos y en el cursor, pero no domina la escala.
+        escala = limites_psd(limpia + cruda)
+        self.contexto.establecer_datos(
+            freqs,
+            limpia,
+            unidad="Hz",
+            series=[cruda] if cruda else [],
+            y_limites=escala,
+        )
+        if freqs:
+            self.grafico.setXRange(min(freqs), max(freqs), padding=0.02)
+        if escala is not None:
+            self.grafico.setYRange(*escala, padding=0)
         self._dibujar_bandas(datos.get("bandas") or {})
+        self._actualizar_posiciones_bandas()
 
         canal = etiqueta_canal(str(datos.get("canal", "?")))
         lap = datos.get("lap")
         lap_txt = "toda la sesión" if lap is None else f"vuelta {lap}"
         self.grafico.setTitle(f"Espectro · {canal} · {lap_txt}")
+        self.lbl_info_psd.setText(
+            f"Δf = {datos.get('delta_f', '?')} Hz · fs = {datos.get('fs', '?')} Hz · "
+            "ventana = "
+            f"{datos.get('nperseg', '?')} muestras. Escala vertical: 80 dB de "
+            "rango dinámico; los valores originales se leen en el cursor."
+        )
 
     def _dibujar_bandas(self, bandas: dict) -> None:
         """Pinta las bandas baja/media/alta con su nombre sobre la franja."""
@@ -237,9 +280,6 @@ class VistaEspectro(VistaBase):
         self._bandas.clear()
         self._etiquetas_banda.clear()
 
-        y_min, y_max = self.grafico.getPlotItem().getViewBox().viewRange()[1]
-        alto = y_max - y_min
-        y_texto = y_max - 0.08 * alto if alto > 0 else y_max
         nombres = {"baja": "Baja", "media": "Media", "alta": "Alta"}
         # PySide convierte los dict de las señales en QVariantMap, que ordena
         # las claves por nombre ('alta', 'baja', 'media'). Aquí imponemos el
@@ -269,10 +309,19 @@ class VistaEspectro(VistaBase):
                 color=TEXTO,
                 anchor=(0.03, 0.05),
             )
-            etiqueta.setPos(x0 + 0.03 * (x1 - x0), y_texto)
+            etiqueta.setPos(x0 + 0.03 * (x1 - x0), 0.0)
             etiqueta.setZValue(5)
             self.grafico.addItem(etiqueta)
             self._etiquetas_banda.append(etiqueta)
+
+    def _actualizar_posiciones_bandas(self, *_args) -> None:
+        """Las etiquetas siguen al eje Y para no quedar cortadas al hacer zoom."""
+        if not self._etiquetas_banda:
+            return
+        y_min, y_max = self.grafico.plotItem.vb.viewRange()[1]
+        y_texto = y_min + 0.06 * (y_max - y_min)
+        for etiqueta in self._etiquetas_banda:
+            etiqueta.setPos(etiqueta.pos().x(), y_texto)
 
     def _mostrar_error_canales(self, mensaje: str) -> None:
         self._canales = []
@@ -283,6 +332,7 @@ class VistaEspectro(VistaBase):
         self.curva_limpia.clear()
         self.curva_cruda.clear()
         self._cursor.establecer_datos([], {})
+        self.contexto.establecer_datos([], [])
 
     def _mostrar_error_espectro(self, mensaje: str) -> None:
         texto = str(mensaje)
@@ -292,7 +342,7 @@ class VistaEspectro(VistaBase):
             aviso = "Esa vuelta no tiene muestras suficientes. Elige otra o 'Todas'."
         else:
             aviso = error_amigable(texto)
+        # Conservar la curva anterior: un cambio de vuelta inválido no debe
+        # dejar el área de análisis vacía sin explicación.
         self.grafico.setTitle(aviso)
-        self.curva_limpia.clear()
-        self.curva_cruda.clear()
-        self._cursor.establecer_datos([], {})
+        self.lbl_info_psd.setText(f"{aviso} · La gráfica anterior se conserva.")

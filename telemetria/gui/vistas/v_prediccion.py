@@ -24,7 +24,11 @@ from PySide6.QtWidgets import (
 
 from telemetria.gui.cliente_api import ApiClient
 from telemetria.gui.glosario import tooltip
-from telemetria.gui.graficas import CursorGrafico
+from telemetria.gui.graficas import (
+    ContextoZoom,
+    CursorGrafico,
+    limites_visualizacion,
+)
 from telemetria.gui.paleta import ACENTO, EXITO, TEXTO
 from telemetria.gui.parametros import PARAMETROS_POR_DEFECTO
 from telemetria.gui.vistas.vista_base import VistaBase, error_amigable
@@ -88,10 +92,14 @@ class VistaPrediccion(VistaBase):
             pen=pg.mkPen("g", width=2), name="Kalman"
         )
         self.grafico.setMinimumHeight(350)
+        self.contexto = ContextoZoom(
+            self.grafico, rotulo="Vuelta", on_ver_todo=self._encuadrar_prediccion
+        )
 
         grp_grafico = QGroupBox("Curvas por vuelta")
         lay_g = QVBoxLayout()
         lay_g.addWidget(self.grafico)
+        lay_g.addWidget(self.contexto)
         grp_grafico.setLayout(lay_g)
         layout.addWidget(grp_grafico, stretch=1)
 
@@ -210,9 +218,13 @@ class VistaPrediccion(VistaBase):
             }
         self._actualizar_cursor()
 
+    def _encuadrar_prediccion(self) -> None:
+        self.contexto._encuadrar()
+
     def _actualizar_cursor(self) -> None:
         if not self._pred_series:
             self._cursor.establecer_datos([], {})
+            self.contexto.establecer_datos([], [])
             return
         laps = sorted({v for serie in self._pred_series.values() for v in serie})
         self._pred_laps = laps
@@ -224,6 +236,17 @@ class VistaPrediccion(VistaBase):
             [float(lap) for lap in laps],
             series,
             formato_x=lambda x, _i: f"Vuelta {int(round(x))}",
+        )
+        principal = next(iter(series))
+        self.contexto.establecer_datos(
+            [float(lap) for lap in laps],
+            [float(v) if v is not None else 0.0 for v in series[principal]],
+            unidad="vueltas",
+            series=[
+                [float(v) if v is not None else 0.0 for v in valores]
+                for valores in series.values()
+            ],
+            y_limites=limites_visualizacion(*series.values()),
         )
 
     def _llenar_metricas(self, datos: dict, modelo: str) -> None:

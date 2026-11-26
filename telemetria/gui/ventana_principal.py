@@ -122,6 +122,23 @@ QPushButton:disabled {{
     background-color: {BORDE};
     color: {TEXTO_DESACTIVADO};
 }}
+QToolButton#herramienta_grafico {{
+    background: {SELECCION_FONDO};
+    color: {TEXTO};
+    border: 1px solid {BORDE};
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 11px;
+    min-height: 20px;
+}}
+QToolButton#herramienta_grafico:checked {{
+    background: {ACENTO};
+    color: {SELECCION_TEXTO};
+    border-color: {ACENTO_HOVER};
+}}
+QToolButton#herramienta_grafico:hover {{
+    border-color: {ACENTO};
+}}
 QLabel {{
     color: {TEXTO};
     font-size: 12px;
