@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from telemetria.gui.cliente_api import ApiClient
 from telemetria.gui.glosario import tooltip
+from telemetria.gui.graficas import CursorGrafico
 from telemetria.gui.paleta import ACENTO, EXITO, TEXTO
 from telemetria.gui.vistas.vista_base import VistaBase, error_amigable
 
@@ -36,7 +37,10 @@ class VistaPrediccion(VistaBase):
 
     def __init__(self, api: ApiClient, parent=None) -> None:
         super().__init__(api, parent)
+        self._pred_laps: list[int] = []
+        self._pred_series: dict[str, dict[int, float]] = {}
         self._construir_ui()
+        self._cursor = CursorGrafico(self.grafico)
         self._conectar_senales()
         # Kalman/Ridge necesitan una sesion activa; se piden al cargarla.
 
@@ -194,6 +198,8 @@ class VistaPrediccion(VistaBase):
             curva.setData(vueltas, valores)
         else:
             curva.clear()
+        nombre = "Ridge" if clave == "ridge" else "Kalman"
+        self._registrar_serie(nombre, vueltas, valores)
         self.grafico.setTitle("Predicción de degradación (Ridge + Kalman)")
 
     def _dibujar_referencia(self, datos: dict) -> None:
@@ -201,6 +207,33 @@ class VistaPrediccion(VistaBase):
         valores = datos.get("verdad", datos.get("proxy", []))
         if vueltas and valores:
             self.curva_verdad.setData(vueltas, valores)
+            self._registrar_serie("Verdad / proxy", vueltas, valores)
+
+    def _registrar_serie(self, nombre: str, vueltas: list, valores: list) -> None:
+        """Guarda la serie por vuelta para que el cursor pueda leerla."""
+        if not vueltas or not valores:
+            self._pred_series.pop(nombre, None)
+        else:
+            self._pred_series[nombre] = {
+                int(v): float(val) for v, val in zip(vueltas, valores)
+            }
+        self._actualizar_cursor()
+
+    def _actualizar_cursor(self) -> None:
+        if not self._pred_series:
+            self._cursor.establecer_datos([], {})
+            return
+        laps = sorted({v for serie in self._pred_series.values() for v in serie})
+        self._pred_laps = laps
+        series = {
+            nombre: [serie.get(lap) for lap in laps]
+            for nombre, serie in self._pred_series.items()
+        }
+        self._cursor.establecer_datos(
+            [float(lap) for lap in laps],
+            series,
+            formato_x=lambda x, _i: f"Vuelta {int(round(x))}",
+        )
 
     def _llenar_metricas(self, datos: dict, modelo: str) -> None:
         metricas = datos.get("metricas", {})

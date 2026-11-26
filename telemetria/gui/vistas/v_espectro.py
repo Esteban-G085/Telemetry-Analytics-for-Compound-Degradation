@@ -29,6 +29,7 @@ from telemetria.gui.etiquetas_canales import (
     filtrar_canales,
 )
 from telemetria.gui.glosario import tooltip
+from telemetria.gui.graficas import CursorGrafico
 from telemetria.gui.paleta import COLORES_BANDA, TEXTO
 from telemetria.gui.vistas.vista_base import VistaBase, error_amigable
 
@@ -43,6 +44,7 @@ class VistaEspectro(VistaBase):
         self._bandas: list[pg.LinearRegionItem] = []
         self._etiquetas_banda: list[pg.TextItem] = []
         self._construir_ui()
+        self._cursor = CursorGrafico(self.grafico)
         self._conectar_senales()
         # La lista de canales y el PSD dependen de la sesion activa.
 
@@ -208,6 +210,15 @@ class VistaEspectro(VistaBase):
 
         self.curva_limpia.setData(freqs, limpia)
         self.curva_cruda.setData(freqs, cruda)
+        series = {"Filtrada": limpia}
+        if cruda:
+            series["Original"] = cruda
+        self._cursor.establecer_datos(
+            list(freqs),
+            series,
+            unidades={nombre: "dB/Hz" for nombre in series},
+            formato_x=lambda x, _i: f"{x:.2f} Hz",
+        )
         self._dibujar_bandas(datos.get("bandas") or {})
 
         canal = etiqueta_canal(str(datos.get("canal", "?")))
@@ -269,6 +280,7 @@ class VistaEspectro(VistaBase):
         self.grafico.setTitle(error_amigable(mensaje))
         self.curva_limpia.clear()
         self.curva_cruda.clear()
+        self._cursor.establecer_datos([], {})
 
     def _mostrar_error_espectro(self, mensaje: str) -> None:
         texto = str(mensaje)
@@ -281,3 +293,4 @@ class VistaEspectro(VistaBase):
         self.grafico.setTitle(aviso)
         self.curva_limpia.clear()
         self.curva_cruda.clear()
+        self._cursor.establecer_datos([], {})

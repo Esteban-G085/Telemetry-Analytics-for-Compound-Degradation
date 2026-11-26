@@ -16,7 +16,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QApplication, QFrame, QLabel
 
 from telemetria.gui.cliente_api import ApiClient
@@ -656,8 +656,55 @@ def test_replay_muestra_rango_visible_y_minimapa(ventana, api) -> None:
 
     contexto.btn_ver_todo.click()
     vista = replay.grafico_comparar.plotItem.vb.viewRange()[0]
-    assert 3050 <= vista[1] <= 3070
+    # Antes el padding del grafico dejaba ver hasta ~3060; ahora la vista se
+    # queda en el ultimo dato, que es justo lo que evita perder la referencia.
+    assert pytest.approx(vista[1], abs=1) == 2999.0
     assert "Tiempo de vuelta (s)" in replay.grafico_comparar.getAxis("bottom").labelText
+
+
+def test_replay_zoom_no_se_sale_de_la_vuelta(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(6)
+    api.vuelta_comparar_recibida.emit(
+        {
+            "lap": 1,
+            "t": [0.0, 1.0, 2.0],
+            "series": {"throttle": [10.0, 20.0, 30.0]},
+        }
+    )
+
+    contexto = replay.contexto_comparar
+    replay.grafico_comparar.setXRange(-30.0, 30.0, padding=0)
+    inicio, fin = replay.grafico_comparar.plotItem.vb.viewRange()[0]
+    assert inicio >= 0.0 and fin <= 2.0
+    assert "0.0–2.0 s" in contexto.lbl_rango.text()
+
+    replay.grafico_comparar.setXRange(0.5, 0.6, padding=0)
+    inicio, fin = replay.grafico_comparar.plotItem.vb.viewRange()[0]
+    assert inicio >= 0.0 and fin <= 2.0
+    assert fin > inicio
+
+
+def test_cursor_detalle_y_unidades(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(6)
+    api.vuelta_recibida.emit(
+        {
+            "lap": 1,
+            "t": [0.0, 1.0, 2.0],
+            "series": {"speed_kmh": [10.0, 20.0, 30.0]},
+            "crudo": {"speed_kmh": [11.0, 21.0, 31.0]},
+        }
+    )
+
+    pos = replay.grafico.plotItem.sceneBoundingRect().center()
+    replay._cursor_detalle.mover(pos)
+    texto = replay._cursor_detalle.lectura
+    assert "t =" in texto and "s" in texto
+    assert "Filtrada" in texto and "Original" in texto
+    assert "km/h" in texto
 
 
 def test_replay_etiqueta_ejes_con_unidades(ventana, api) -> None:
@@ -716,3 +763,61 @@ def test_cliente_cachea_vuelta_y_limpia_al_cambiar_de_sesion(qt_app) -> None:
 
     assert api.peticiones == 2
     api.cerrar()
+
+
+def test_cursor_espectro_y_prediccion(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+
+    espectro = ventana.pestanas.widget(2)
+    api.espectro_recibido.emit(
+        {
+            "canal": "wheel_slip_fl",
+            "lap": 1,
+            "freqs": [0.0, 1.0, 2.0],
+            "psd_limpio_db": [-10.0, -20.0, -30.0],
+            "psd_crudo_db": [-5.0, -15.0, -25.0],
+        }
+    )
+    espectro._cursor.mover(espectro.grafico.plotItem.sceneBoundingRect().center())
+    texto_espectro = espectro._cursor.lectura
+    assert "Hz" in texto_espectro
+    assert "dB/Hz" in texto_espectro
+    assert "Filtrada" in texto_espectro and "Original" in texto_espectro
+
+    prediccion = ventana.pestanas.widget(3)
+    api.kalman_recibido.emit(
+        {
+            "laps_test": [2, 3],
+            "pred": [0.2, 0.3],
+            "verdad_laps": [2, 3],
+            "verdad": [0.21, 0.31],
+        }
+    )
+    api.ridge_recibido.emit({"laps_all": [1, 2, 3], "pred_all": [0.1, 0.2, 0.3]})
+    prediccion._cursor.mover(prediccion.grafico.plotItem.sceneBoundingRect().center())
+    texto_prediccion = prediccion._cursor.lectura
+    assert "Vuelta" in texto_prediccion
+    assert "Ridge" in texto_prediccion and "Kalman" in texto_prediccion
+
+
+def test_cursor_se_oculta_fuera_del_grafico(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(6)
+    api.vuelta_comparar_recibida.emit(
+        {
+            "lap": 1,
+            "t": [0.0, 1.0, 2.0],
+            "series": {"throttle": [10.0, 20.0, 30.0]},
+        }
+    )
+
+    replay._mover_cursor_comparacion(
+        replay.grafico_comparar.plotItem.sceneBoundingRect().center()
+    )
+    assert replay._lectura_cursor is not None
+    assert replay._lectura_cursor.isVisible()
+
+    replay._mover_cursor_comparacion(QPointF(-10000.0, -10000.0))
+    assert not replay._lectura_cursor.isVisible()

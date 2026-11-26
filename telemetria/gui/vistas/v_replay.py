@@ -34,7 +34,7 @@ from telemetria.gui.etiquetas_canales import (
     unidad_canal,
 )
 from telemetria.gui.glosario import tooltip
-from telemetria.gui.graficas import ContextoZoom
+from telemetria.gui.graficas import ContextoZoom, CursorGrafico
 from telemetria.gui.paleta import (
     BORDE_SUAVE,
     PAPEL,
@@ -71,12 +71,12 @@ class VistaReplay(VistaBase):
         self._y_comparar_visible: dict[str, list] = {}
         self._rangos_comparar: dict[str, tuple[float, float]] = {}
         self._curva_diferencia: object | None = None
-        self._linea_cursor: object | None = None
-        self._lectura_cursor: object | None = None
         self._x_dibujado: list[float] = []
         self._y_dibujado: dict[str, list] = {}
         self._redibujando = False
         self._construir_ui()
+        self._cursor_comparar = CursorGrafico(self.grafico_comparar)
+        self._cursor_detalle = CursorGrafico(self.grafico)
         self._conectar_senales()
         # Vueltas y canales llegan con sesion_activa_recibida.
 
@@ -287,9 +287,6 @@ class VistaReplay(VistaBase):
         self.chk_progreso.toggled.connect(self._actualizar_eje_comparacion)
         self.chk_diferencia.toggled.connect(self._actualizar_diferencia)
         self.btn_encuadrar.clicked.connect(self._encuadrar_comparacion)
-        self.grafico_comparar.scene().sigMouseMoved.connect(
-            self._mover_cursor_comparacion
-        )
         self.grafico_comparar.plotItem.vb.sigRangeChanged.connect(
             self._al_cambiar_rango_comparacion
         )
@@ -430,6 +427,7 @@ class VistaReplay(VistaBase):
         if hasattr(self, "contexto_comparar"):
             self.contexto_comparar.establecer_datos([], [])
         self._actualizar_diferencia()
+        self._actualizar_cursor_comparar()
         self._ocultar_cursor()
 
     @staticmethod
@@ -533,13 +531,14 @@ class VistaReplay(VistaBase):
             self._redibujando = False
 
     def _al_cambiar_normalizacion(self, _marcado=None) -> None:
-        """La etiqueta cambia al instante; los datos se recargan aparte."""
+        """La etiqueta y el cursor cambian al instante; datos aparte."""
         self.grafico_comparar.setLabel(
             "left",
             self._etiqueta_y(
                 list(self._series_comparar), self.chk_normalizar.isChecked()
             ),
         )
+        self._actualizar_cursor_comparar()
 
     def _actualizar_eje_comparacion(self) -> None:
         self.grafico_comparar.setLabel(
@@ -551,22 +550,24 @@ class VistaReplay(VistaBase):
         if not self._series_comparar:
             return
         self._x_comparar_visible = self._x_para_comparar(self._t_comparar)
-        # El rango anterior está en la unidad vieja (s vs. %): lo reencuadra.
-        self.grafico_comparar.setXRange(
-            min(self._x_comparar_visible),
-            max(self._x_comparar_visible),
-            padding=0.02,
-        )
         canales = list(self._series_comparar)
+        # Primero se fijan los límites de la nueva unidad (s o %); si se
+        # reencuadra antes, el rango viejo recorta los datos al redibujar.
         self.contexto_comparar.establecer_datos(
             self._x_comparar_visible,
             self._y_comparar_visible.get(canales[0], []) if canales else [],
             unidad="%" if self.chk_progreso.isChecked() else "s",
         )
+        self.grafico_comparar.setXRange(
+            min(self._x_comparar_visible),
+            max(self._x_comparar_visible),
+            padding=0.02,
+        )
         self.grafico_comparar.setLabel(
             "left", self._etiqueta_y(canales, self.chk_normalizar.isChecked())
         )
         self._redibujar_curvas_comparar()
+        self._actualizar_cursor_comparar()
 
     def _actualizar_diferencia(self, _marcado=None) -> None:
         if self._curva_diferencia is not None:
@@ -606,67 +607,56 @@ class VistaReplay(VistaBase):
         self.grafico_comparar.enableAutoRange(axis="y")
         self._ocultar_cursor()
 
-    def _ocultar_cursor(self) -> None:
-        if self._linea_cursor is not None:
-            self._linea_cursor.hide()
-        if self._lectura_cursor is not None:
-            self._lectura_cursor.hide()
+    @property
+    def _linea_cursor(self):
+        """Compatibilidad: línea vertical del cursor compartido."""
+        return self._cursor_comparar._linea_v
 
-    def _mover_cursor_comparacion(self, pos) -> None:
-        if not self._x_comparar_visible or not self._series_comparar:
-            return
-        grafico = self.grafico_comparar
-        if not grafico.plotItem.sceneBoundingRect().contains(pos):
-            return
-        x = grafico.plotItem.vb.mapSceneToView(pos).x()
-        x_min, x_max = grafico.plotItem.vb.viewRange()[0]
-        if x < x_min or x > x_max:
-            return
+    @property
+    def _lectura_cursor(self):
+        """Compatibilidad: caja de lectura del cursor compartido."""
+        return self._cursor_comparar._texto
 
-        idx = bisect_left(self._x_comparar_visible, x)
-        candidatos = [
-            i for i in (idx - 1, idx) if 0 <= i < len(self._x_comparar_visible)
-        ]
-        if not candidatos:
-            return
-        mejor = min(
-            candidatos,
-            key=lambda i: abs(self._x_comparar_visible[i] - x),
-        )
-
-        if self._linea_cursor is None:
-            self._linea_cursor = pg.InfiniteLine(
-                angle=90,
-                movable=False,
-                pen=pg.mkPen(TEXTO_SUAVE, width=1, style=Qt.PenStyle.DotLine),
-            )
-            grafico.addItem(self._linea_cursor, ignoreBounds=True)
-        if self._lectura_cursor is None:
-            self._lectura_cursor = pg.TextItem(color=TEXTO, anchor=(0.02, 0.98))
-            grafico.addItem(self._lectura_cursor, ignoreBounds=True)
-
-        x_visible = self._x_comparar_visible[mejor]
-        self._linea_cursor.setPos(x_visible)
-        self._linea_cursor.show()
-
+    def _formato_x_comparar(self, x: float, i: int) -> str:
         if self.chk_progreso.isChecked():
-            cabecera = f"{x_visible:.1f} % de vuelta"
-        else:
-            cabecera = f"t = {self._fmt(self._t_comparar[mejor])} s"
-        lineas = [cabecera]
+            t = self._t_comparar[i] if i < len(self._t_comparar) else x
+            return f"{x:.1f} % de vuelta · t = {self._fmt(t)} s"
+        return f"t = {self._fmt(x)} s"
+
+    def _actualizar_cursor_comparar(self) -> None:
+        """Entrega al cursor los valores vigentes (crudos o normalizados)."""
+        n = len(self._x_comparar_visible)
+        if not n or not self._series_comparar:
+            self._cursor_comparar.establecer_datos([], {})
+            return
+        normalizar = self.chk_normalizar.isChecked()
+        series: dict[str, list] = {}
+        unidades: dict[str, str] = {}
+        detalles: dict[str, list[str]] = {}
         for canal, valores in self._series_comparar.items():
             nombre = etiqueta_canal(canal)
-            original = self._fmt(valores[mejor])
-            if self.chk_normalizar.isChecked():
-                visible = self._fmt(self._y_comparar_visible[canal][mejor])
-                lineas.append(f"{nombre}: {original} · {visible} (0–1)")
+            series[nombre] = list(self._y_comparar_visible.get(canal, []))[:n]
+            if normalizar:
+                unidades[nombre] = "0–1"
+                detalles[nombre] = [
+                    f"original {self._fmt(v)}" for v in list(valores)[:n]
+                ]
             else:
-                lineas.append(f"{nombre}: {original}")
-        self._lectura_cursor.setText("\n".join(lineas))
+                unidades[nombre] = unidad_canal(canal)
+        self._cursor_comparar.establecer_datos(
+            self._x_comparar_visible,
+            series,
+            unidades=unidades,
+            detalles=detalles,
+            formato_x=self._formato_x_comparar,
+        )
 
-        y_min, y_max = grafico.plotItem.vb.viewRange()[1]
-        self._lectura_cursor.setPos(x_visible, y_max - 0.05 * (y_max - y_min))
-        self._lectura_cursor.show()
+    def _ocultar_cursor(self) -> None:
+        self._cursor_comparar.ocultar()
+
+    def _mover_cursor_comparacion(self, pos) -> None:
+        """Alias conservado para pruebas y smoke; el cursor es compartido."""
+        self._cursor_comparar.mover(pos)
 
     def _dibujar_comparacion(self, datos: dict) -> None:
         t = list(datos.get("t") or [])
@@ -710,17 +700,20 @@ class VistaReplay(VistaBase):
         self.grafico_comparar.setTitle(
             f"Vuelta {datos.get('lap', '?')} · {len(canales)} señales"
         )
-        self.grafico_comparar.setXRange(
-            min(self._x_comparar_visible),
-            max(self._x_comparar_visible),
-            padding=0.02,
-        )
+        # Los límites del minimapa se fijan antes del encuadre para que el
+        # padding no saque la vista del rango real de la vuelta.
         self.contexto_comparar.establecer_datos(
             self._x_comparar_visible,
             self._y_comparar_visible.get(canales[0], []),
             unidad="%" if self.chk_progreso.isChecked() else "s",
         )
+        self.grafico_comparar.setXRange(
+            min(self._x_comparar_visible),
+            max(self._x_comparar_visible),
+            padding=0.02,
+        )
         self._redibujar_curvas_comparar()
+        self._actualizar_cursor_comparar()
 
     def _mostrar_error_comparacion(self, mensaje: str) -> None:
         self.grafico_comparar.setTitle(error_amigable(mensaje))
@@ -801,8 +794,22 @@ class VistaReplay(VistaBase):
             self.contexto_detalle.establecer_datos(
                 x_dibujado, dibujadas[nombre_canal], unidad="s"
             )
+            series_cursor = {"Filtrada": dibujadas[nombre_canal]}
+            if crudo_valores:
+                series_cursor["Original"] = [
+                    crudo_valores[i] for i in indices
+                ]
+            self._cursor_detalle.establecer_datos(
+                x_dibujado,
+                series_cursor,
+                unidades={
+                    nombre: unidad_canal(nombre_canal) for nombre in series_cursor
+                },
+                formato_x=lambda x, _i: f"t = {x:.2f} s",
+            )
         else:
             self.contexto_detalle.establecer_datos([], [])
+            self._cursor_detalle.establecer_datos([], {})
 
         # Las KPIs describen la vuelta completa, no los puntos dibujados.
         total = int(datos.get("n_total") or kpis.get("n_vuelta") or 0)
@@ -839,5 +846,6 @@ class VistaReplay(VistaBase):
         self.curva_limpia.clear()
         self.curva_cruda.clear()
         self.contexto_detalle.establecer_datos([], [])
+        self._cursor_detalle.establecer_datos([], {})
         self._limpiar_tarjetas()
         self.lbl_kpis.setText(error_amigable(mensaje))
