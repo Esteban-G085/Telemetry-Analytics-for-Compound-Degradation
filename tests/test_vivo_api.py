@@ -105,6 +105,24 @@ def test_estado_incluye_diagnostico(cliente_vivo):
     assert estado["paquetes_perdidos"] == 0  # el modo seco no tiene packetId real
 
 
+def test_estado_refleja_diagnostico_no_cero(cliente_vivo):
+    """Los contadores reales de fuente y bus llegan al estado (B2/B3)."""
+    c, _ = cliente_vivo
+    c.post("/api/vivo/iniciar", json={"fuente": "seco", "archivo": "demo.csv", "ritmo_hz": 0})
+    _esperar_muestras(c)
+
+    sesion = c.app.state.vivo
+    sesion.fuente.paquetes_perdidos = 7
+    sesion.fuente.fs_medida = 321.5
+    sesion.bus.errores_subs = 2
+    sesion.fuente.errores_subs_crudos = 1
+
+    estado = c.get("/api/vivo/estado").json()
+    assert estado["paquetes_perdidos"] == 7
+    assert estado["fs_medida"] == 321.5
+    assert estado["errores_subs"] == 3  # 2 del bus + 1 de suscriptor crudo
+
+
 def test_detener_bajo_carga(cliente_vivo):
     """Detener mientras la fuente produce rapido cierra limpio y sin errores (C)."""
     c, dir_vivo = cliente_vivo

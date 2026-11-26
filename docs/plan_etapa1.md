@@ -197,7 +197,11 @@ Esta parte cambia según la fuente:
 
 - **F1 (simulada):** la etiqueta es la degradación verdadera del generador, muestreada por muestra → escalar y etiquetar por ventana.
 - **F2 (Live Telemetry):** si el CSV trae `Tire wear (%)`, úsalo como etiqueta real (`wear%/100`). Recordar verificar si es acumulado de sesión. Es la mejor opción disponible.
-- **F3 y F4:** no tienen desgaste. Usa el proxy:
+- **F3 (logger propio):** la memoria de AC sí expone `tyreWear[4]`; la Etapa 3 lo
+  usa como grip auto-calibrado contra el máximo observado (plan 3, D6). Si no
+  hay grip utilizable, la degradación queda en `NaN` y no se inventa una etiqueta
+  (D11).
+- **F4 (datasets públicos):** no traen desgaste. Usa el proxy:
   - [x] Calcular el tiempo por vuelta.
   - [x] **Corregir por combustible** con D7 (`t_corr = t − k_fuel · kg`); calibrar `k_fuel` por regresión en las primeras vueltas.
   - [x] Definir la vuelta de referencia (D8: mediana de las vueltas 1–3 corregidas) y calcular el delta por vuelta.

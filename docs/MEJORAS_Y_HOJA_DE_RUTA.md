@@ -117,6 +117,57 @@ Resultados:
 
 Se corrigió durante la fase el fallo del gráfico horizontal de importancias: pyqtgraph no acepta una lista de colores en `brush` de `BarGraphItem`, así que se dibuja un grupo de barras por signo con un `QBrush` válido.
 
-## Fuera de alcance y trabajo posterior
+## Fase 2: coherencia de la captura en vivo y de la documentación
 
-Esta fase no modifica la adquisición, el acondicionador causal, el generador, las etiquetas ni los modelos. Las cuestiones abiertas de `docs/revision_telemetry_analytics.md`, en particular el logger crudo con etiqueta, el pico del grip, la pérdida de paquetes y la validación con datos reales, siguen pendientes y se abordan en fases posteriores. Ninguna de ellas se ha resuelto aquí de forma implícita.
+La Fase 1 no tocó la adquisición. Esta fase tampoco cambia los cálculos: pone
+los planes y el checklist al día con lo que el código ya hace, y fija con una
+prueba que los diagnósticos de la captura llegan al estado expuesto por la API.
+
+### Ya implementado (verificado contra el código)
+
+- El logger registra la fila **cruda** (`Fuente.suscribir_crudo`) con
+  `packetId`, `grip_*` y `degradacion`; no escribe `_verdad.csv` (A1/A5/D7).
+- La decimación usa `timestamp_s` reales, el filtro arranca con `sosfilt_zi` y
+  el Welch interpola huecos internos (A2/B7/B9).
+- `FuenteVivo` cuenta los `packetId` salteados y mide `fs_medida`;
+  `VivoSesion.estado()` expone ambos junto con `errores_subs`, y la pestaña
+  En vivo los muestra (B2/B3). Antes solo se comprobaba que las claves
+  existieran y valieran cero; ahora una prueba fija que los valores no nulos
+  de fuente y bus llegan al estado (`test_estado_refleja_diagnostico_no_cero`).
+- Los suscriptores están protegidos, el CSV se crea perezosamente y el logger
+  ignora escrituras tardías (B3/B6/B11).
+- Sin grip utilizable la degradación queda en `NaN` con modo `none`: se retiró
+  la afirmación de fallback al proxy (A3/D11).
+- `config.yaml` fija `vivo.ventana_s = 2.0`, igual que el batch (A6), y README
+  aclara que Ridge no interviene en vivo (A4). El plan 1 ya describe F3 con
+  `tyreWear` (A7) y `ritmo_hz` queda documentado como interruptor (A8).
+
+### Sigue pendiente (no implementado aquí)
+
+- **B1:** pico robusto P95 y detección de cambio de neumáticos. El código usa
+  el máximo observado y solo reinicia la historia cuando la vuelta retrocede
+  (B10). Cambiaría la degradación calculada, así que requiere una decisión
+  explícita, no un ajuste silencioso.
+- **B4/B5:** Kalman por rueda, `R` ampliado en la vuelta parcial y filtro
+  incremental. `_predecir` vuelve a filtrar la serie completa en cada
+  `estado()`, aunque `KalmanDegradacion` ya expone `paso`.
+- **C:** validación con datos reales de AC. No se sustituye por más simulación.
+
+### Contratos y compatibilidad
+
+No hay cambios de API ni de algoritmos. `GET /api/vivo/estado` ya incluía las
+claves de diagnóstico; solo se añade una prueba de regresión. El detalle
+casilla por casilla está en
+[`docs/revision_telemetry_analytics.md`](revision_telemetry_analytics.md) y las
+decisiones corregidas en [`docs/plan_etapa3.md`](plan_etapa3.md).
+
+### Verificación añadida
+
+```bash
+python -m pytest tests/test_vivo_api.py -q
+python -m pytest -q
+```
+
+Resultados: `11 passed` en el módulo en vivo y `200 passed` en la suite
+completa. La GUI sigue con 43 tests de humo; el total de Fase 1 (199) más la
+nueva prueba de diagnóstico da 200.

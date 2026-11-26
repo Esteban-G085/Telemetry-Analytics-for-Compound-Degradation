@@ -29,8 +29,14 @@ El detalle de la Fase 1 de claridad externa está en
 La rama `feature/ui-claridad-externa` añade la **Fase 1 de claridad externa**:
 ablación individual y combinada de sensores, resolución real de Welch,
 coherencia de Predicción, tooltips de parámetros y semántica de Alpha. No cambia
-los algoritmos científicos ni rompe los contratos existentes. El detalle y el
-trabajo posterior están en
+los algoritmos científicos ni rompe los contratos existentes.
+
+La **Fase 2** de la misma rama pone los planes y el checklist de la revisión
+técnica al día con el código de captura en vivo (logger crudo, paquetes
+perdidos, arranque confirmado, sin fallback al proxy) y añade una prueba que
+fija que los diagnósticos llegan al estado. Tampoco cambia algoritmos: el pico
+robusto P95, el Kalman por rueda y la validación con datos reales siguen
+pendientes. El detalle está en
 [`docs/MEJORAS_Y_HOJA_DE_RUTA.md`](docs/MEJORAS_Y_HOJA_DE_RUTA.md).
 
 La Etapa 1 ya está preparada para la 3: las features se calculan **por ventana**,
@@ -318,7 +324,7 @@ vivo. En la pestaña **En vivo**, al iniciar una captura se abre automáticament
 python -m pytest -q
 ```
 
-**199 tests** de Python en verde (incluidos 43 de humo de la GUI en modo `offscreen`).
+**200 tests** de Python en verde (incluidos 43 de humo de la GUI en modo `offscreen`).
 Cobertura por área:
 
 | Fichero | Qué cubre |
@@ -334,7 +340,7 @@ Cobertura por área:
 | `tests/test_acondicionador.py` | Decimación a la frecuencia objetivo, atenuación del filtro y outliers causales. |
 | `tests/test_fuentes.py` | `BusTiempoReal` y `FuenteCSV` (decimación, esquema y verdad inyectada). |
 | `tests/test_motor_vivo.py` | Degradación agregada desde grip o columna inyectada, predicción Kalman agregada y logger CSV. |
-| `tests/test_vivo_api.py` | Endpoints `/api/vivo/*` y el WebSocket `/api/vivo/stream` (incluye detener bajo carga). |
+| `tests/test_vivo_api.py` | Endpoints `/api/vivo/*` y el WebSocket `/api/vivo/stream` (detener bajo carga y diagnósticos de fuente/bus en el estado). |
 | `tests/test_coherencia_live_batch.py` | **D14**: la ruta en vivo (outliers causales + filtro + decimación) reproduce la señal del pipeline batch con correlación > 0.97. Incluye el reprocesado del **CSV crudo** del logger en batch (logger → batch, A1/C/D4). |
 | `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay (orden estable, normalización, progreso %, diferencia A − B, cursor, encuadre, minimapa limitado, rango visible, unidades de ejes, presupuesto adaptativo, zoom sin petición y caché); también cubre los modos archivo/vivo, el Taller de modelos, la Guía rápida, las tarjetas de calidad y, en Fase 1, la ablación separada, la resolución efectiva del espectro, el cursor por serie, las particiones de Predicción, la banda de Kalman, R²/cobertura/error de caída, las importancias y la semántica de α. |
 | `tests/test_reduccion.py` | LTTB multicanal: conserva extremos y picos de cualquier señal, comparte índices entre series y respeta el presupuesto de puntos. |
@@ -427,8 +433,9 @@ Cualquier fuente (F1…F4) debe producir estas columnas (el contrato está en
    y **trazabilidad** (config usado + sha256 del CSV de entrada).
 
 Los artefactos reutilizables quedan en `data/processed/`:
-`senal_limpia.csv.gz`, `importancias.csv` y `modelo_ridge.joblib` (este último sirve
-para la Etapa 3).
+`senal_limpia.csv.gz`, `importancias.csv` y `modelo_ridge.joblib`. Este último
+sirve al análisis offline; **no interviene en la captura en vivo**, donde solo
+se usa Kalman sobre la degradación agregada.
 
 ## Resultados de referencia (semilla 42, 40 vueltas)
 

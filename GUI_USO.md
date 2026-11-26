@@ -235,6 +235,15 @@ En la pestaña **En vivo**, al iniciar una captura se abre automáticamente el
 WebSocket `/api/vivo/stream`, que empuja JSON tipo `vivo` cada ~100 ms con el
 estado del motor y la ventana reciente para el osciloscopio en tiempo real.
 
+El panel de estado muestra también el diagnóstico de la captura: paquetes
+perdidos (saltos de `packetId`), frecuencia realmente medida y fallos de
+suscriptores. Un valor distinto de cero indica un problema de adquisición, no
+un cambio en la degradación. Sin grip utilizable, el estado deja la degradación
+en `NaN` (los valores llegan como `None` y el modo es `none`) en lugar de
+inventar un valor con el proxy de tiempos. Esta coherencia es la Fase 2 y se
+detalla en
+[`docs/MEJORAS_Y_HOJA_DE_RUTA.md`](docs/MEJORAS_Y_HOJA_DE_RUTA.md).
+
 ## Tecnologías
 
 - **PySide6** (LGPL, open source): widgets de ventana nativa.
@@ -257,7 +266,7 @@ usaba (`/stint`, dispersión y correlación).
 .venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider
 ```
 
-**199 tests** en total, de los cuales **43** son de humo de la GUI en modo
+**200 tests** en total, de los cuales **43** son de humo de la GUI en modo
 `offscreen`. Comprueban que arranca sin sesión, que se refresca al cargar una,
 que las 7 pestañas tienen ayuda visible, que los selectores usan nombres
 amables y ocultan las columnas de contexto, y que el comparador de Replay

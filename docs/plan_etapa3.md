@@ -41,11 +41,11 @@ generador F1 (usado como **modo seco** para desarrollar sin AC en pista).
 | D3 | Fuente de datos | **F3 (logger propio) para el vivo; F1 como «modo seco»** | El modo seco reproduce un CSV por **la misma ruta de código** que el dato real, así que sirve para desarrollar y para los tests sin depender de AC. |
 | D4 | Frecuencia de muestreo | **Captura ≈333 Hz (`fs_original`); bus a 100 Hz (`fs_salida`)** | La física de AC se actualiza a ~333 Hz; el pipeline (features, Welch) está diseñado a 100 Hz. Se decima con un **acumulador temporal sobre los `timestamp_s` reales** para respetar el jitter medido, no el `dt` nominal. |
 | D5 | Acondicionamiento causal | **Outliers mediana/MAD causal + IIR Butterworth SOS (20 Hz) muestra a muestra + decimación** | En vivo no hay futuro. El detector causal sustituye el pico por un *zero-order hold* y marca la salida como no válida; el IIR conserva su estado entre llamadas (forma II traspuesta, escalar y rápida) y arranca con `sosfilt_zi` para no subir desde 0. |
-| D6 | Degradación en vivo | **`tyreWear` (grip) auto-calibrado contra un pico robusto (P95 de las primeras 5 vueltas, reiniciable al cambiar neumáticos)** | En AC1 `tyreWear[4]` es una señal de **agarre/salud** (no monótona): al calentar sube y al degradarse baja. Se normaliza `(pico − grip)/pico` y se limita a `[0,1]`. **Sin grip utilizable la degradación queda en `NaN` (modo `none`)**; no cae al proxy de tiempos (decisión de la revisión). |
-| D7 | Registro de la captura | **`LoggerVivo`: `<nombre>.csv` **crudo** (esquema + `packetId`/`grip_*`/`degradacion`) + `<nombre>_verdad.csv`** | El logger se suscribe a la fuente **antes** del acondicionador, así el CSV es reprocesable en batch sin doble filtrado. Permite volver a procesar una captura con el pipeline batch y comparar contra la verdad. |
-| D8 | Transporte al frontend | **WebSocket `/api/vivo/stream` empujando JSON a ~10 Hz (`fps_ws`)** | Más rápido que lo que el ojo necesita y mucho más barato que empujar cada muestra de 100 Hz. La ventana se reenvía completa (200 puntos, 2 s) y el cliente solo repinta. |
-| D9 | Vista de la interfaz | **Vista 7 «En vivo»** | El frontend ya tenía 6 vistas (la 6 es Replay, que reproduce en local). La captura servidor→cliente merece su propia pestaña. |
-| D10 | App local | Lanzador `telemetria/api/lanzador.py` (`python -m telemetria`) que levanta uvicorn y abre el navegador | Simple, sin dependencias adicionales de GUI. Se puede usar como app nativa (WebView2) o como servidor local para una segunda pantalla/tablet. |
+| D6 | Degradación en vivo | **`tyreWear` (grip) normalizado contra el máximo observado en la captura** | En AC1 `tyreWear[4]` es una señal de **agarre/salud** (no monótona): al calentar sube y al degradarse baja. Se normaliza `(pico − grip)/pico` y se limita a `[0,1]`. El pico es el **máximo visto** (no un P95) y no se reinicia por cambio de neumáticos; solo se limpia la historia cuando la vuelta retrocede (B10). **Sin grip utilizable la degradación queda en `NaN` (modo `none`)**; no cae al proxy de tiempos (D11). El pico robusto sigue pendiente en B1. |
+| D7 | Registro de la captura | **`LoggerVivo`: `<nombre>.csv` **crudo** (esquema + `packetId`/`grip_*`/`degradacion`)** | El logger se suscribe a la fuente **antes** del acondicionador, así el CSV es reprocesable en batch sin doble filtrado. No escribe un `_verdad.csv` aparte: la verdad se recalcula en batch desde el propio CSV. El modo seco sí **lee** un `<nombre>_verdad.csv` si ya existe al lado del archivo reproducido. |
+| D8 | Transporte a la GUI | **WebSocket `/api/vivo/stream` empujando JSON a ~10 Hz (`fps_ws`)** | Más rápido que lo que el ojo necesita y mucho más barato que empujar cada muestra de 100 Hz. La ventana se reenvía completa (200 puntos, 2 s) y el cliente solo repinta. |
+| D9 | Vista de la interfaz | **Vista 7 «En vivo»** | La GUI ya tenía 6 pestañas (la 6 es Replay, que reproduce en local). La captura servidor→cliente merece la suya propia. |
+| D10 | App local | `python -m telemetria` (o `ejecutar_app.bat`) abre la **GUI nativa PySide6** | Se retiró el lanzador de navegador: la app es una ventana de escritorio con `QNetworkAccessManager` y `QWebSocket`, sin frontend Vite/uPlot ni WebView2. |
 | D11 | Fallback sin grip | **Dejar la degradación en `NaN` (modo `none`); no caer al proxy de tiempos** | El proxy de tiempos y la degradación por grip no son comparables; mezclarlos engaña. Se expone la ausencia de etiqueta en vez de un valor inventado (decisión de la revisión, A3). |
 | D12 | Desacople fuente↔motor | **`BusTiempoReal` (buffer circular en RAM)** | La fuente (hilo) publica; el motor y el WS leen. Evita acoplar la captura de AC al consumo del frontend. |
 | D13 | Criterio de corrección live-vs-batch | **Correlación > 0.97 por canal y error relativo < 0.2** | El objetivo no es igualdad bit a bit (el batch remuestrea con `resample_poly` y usa otra inicialización del filtro), sino que la señal en vivo sea **coherente** con la del pipeline offline. |
@@ -71,9 +71,9 @@ generador F1 (usado como **modo seco** para desarrollar sin AC en pista).
 │        └─> outliers causales + IIR SOS 20 Hz + decimación 100 Hz         │
 │   BusTiempoReal  ──>  MotorVivo (telemetria/adquisicion/motor_vivo.py)                      │
 │        ├─ features en ventana deslizante (telemetria/pipeline/features.py)               │
-│        ├─ degradación desde grip auto-calibrado / columna inyectada      │
+│        ├─ degradación desde grip / columna inyectada                     │
 │        └─ predicción Kalman (telemetria/pipeline/modelo.py)                              │
-│   LoggerVivo  ──>  data/vivo/<nombre>.csv  (+ _verdad.csv)               │
+│   LoggerVivo  ──>  data/vivo/<nombre>.csv  (crudo; sin _verdad.csv)      │
 │                                                                          │
 │   REST: /api/vivo/{iniciar,detener,estado,ventana,sesiones,layout}       │
 │   WS:   /api/vivo/stream  (push JSON ~10 Hz)                            │
@@ -135,41 +135,49 @@ un CSV a ritmo real (o a máxima velocidad en tests) por el mismo
 ### 3.3 Motor en vivo (`telemetria/adquisicion/motor_vivo.py`, `telemetria/api/servicios/vivo.py`)
 
 - `MotorVivo`: mantiene la ventana reciente en un `DataFrame`, calcula las features
-  con `features_ventana`, estima la degradación por rueda (pico robusto P95 +
-  reinicio por cambio de neumáticos) y proyecta con `KalmanDegradacion` las
-  próximas `vivo.anticipacion_vueltas` vueltas. La predicción se calcula **por
-  rueda** además de sobre la media (B4), la vuelta en curso entra como observación
-  con un `R` mayor (media parcial ruidosa, B4) y el filtro es **incremental**
-  (`paso` vuelta a vuelta, sin refiltrar la historia en cada `estado()`, B5). Si
-  la vuelta retrocede (nueva sesión) se reinicia el *stint* en vez de sobrescribir
-  la historia (B10) y el Welch en vivo interpola los huecos internos en lugar de
-  concatenar muestras separadas (B9).
+  con `features_ventana`, estima la **degradación agregada** desde el grip
+  (`(pico observado − grip)/pico`, con la media de las cuatro ruedas) o desde la
+  columna `degradacion` inyectada en modo seco, y proyecta esa media con
+  `KalmanDegradacion` las próximas `vivo.anticipacion_vueltas` vueltas. Sin grip y
+  sin columna inyectada la degradación queda en `NaN` (modo `none`, D11). No hay
+  predicción por rueda ni `R` ampliado para la vuelta parcial (B4 pendiente), y
+  `_predecir` vuelve a filtrar la serie completa en cada `estado()` (B5
+  pendiente, aunque `KalmanDegradacion` ya expone `paso`). Si la vuelta retrocede
+  (nueva sesión) se reinicia el *stint* en vez de sobrescribir la historia (B10) y
+  el Welch en vivo interpola los huecos internos en lugar de concatenar muestras
+  separadas (B9). El pico robusto P95 y el reinicio por cambio de neumáticos
+  siguen pendientes (B1).
 - `LoggerVivo`: se suscribe **antes** del acondicionador (`Fuente.suscribir_crudo`)
-  y vuelca el CSV crudo (esquema + `packetId`/`grip_*`/`degradacion`) + la verdad a
-  `data/vivo/`. El archivo se crea **perezosamente** en el primer registro (B6) y
+  y vuelca el CSV **crudo** (esquema + `packetId`/`grip_*`/`degradacion`) en
+  `data/vivo/`. No genera `_verdad.csv`: la verdad se recalcula en batch desde el
+  propio CSV. El archivo se crea **perezosamente** en el primer registro (B6) y
   las escrituras tras `cerrar()` se ignoran en lugar de lanzar (B11).
 - `VivoSesion`: orquesta fuente + acondicionador + bus + motor + logger, con
   `iniciar` / `detener` / `estado` / `ventana` / `listar`. Un CSV inválido no
   detiene la captura en curso (B6) y `estado` expone `paquetes_perdidos`,
   `fs_medida` y `errores_subs` (B2/B3).
 
-### 3.4 Vista 7 «En vivo» (`frontend/src/vistas/v_vivo.js`)
+### 3.4 Vista 7 «En vivo» (`telemetria/gui/vistas/v_vivo.py`)
 
-- Selector de fuente (`ac` / `seco`), CSV y ritmo (tiempo real / máxima velocidad);
-  botones **Iniciar** / **Detener**; *pills* de estado del WebSocket y de la captura.
-- **Osciloscopio**: canal y rueda seleccionables (slip, temperatura, carga,
-  presión o velocidad), ventana deslizante de 2 s (misma que la de features).
-- **Espectro en vivo** de la ventana y **planta 2×2** con el semáforo de
-  degradación por rueda y el grip asociado.
-- **Predicción** de las próximas vueltas con su intervalo, más la **proyección
-  final por rueda** (se resalta la que más se degrada, B4).
+- Selector de fuente (`seco` / `ac`), selector de CSV y botones **Iniciar** /
+  **Detener** captura. El panel muestra el estado del motor, el diagnóstico de la
+  captura (`paquetes_perdidos`, `fs_medida`, `errores_subs`, B2/B3) y el
+  diagnóstico de la memoria de AC.
+- **Osciloscopio** en tiempo real sobre `/api/vivo/stream`, con cursor y
+  navegación de la ventana.
+- El estado muestra la degradación por rueda y su media agregada junto al modo
+  (`verdad` o `none`); la predicción con Kalman es agregada. No hay semáforo por
+  rueda ni proyección final por rueda (B4 pendiente).
+- **Predicción** de las próximas vueltas sobre la media, con la banda de
+  incertidumbre de Kalman.
 
-### 3.5 app local (navegador) (`telemetria/api/lanzador.py`, `ejecutar_app.bat`)
+### 3.5 App local (`telemetria/cli.py`, `telemetria/gui/main.py`, `ejecutar_app.bat`)
 
-- `telemetria/api/lanzador.py` (vía `python -m telemetria app`): arranca `uvicorn`
-  en un hilo, espera `/health`, opcionalmente inicia la captura (`--modo ac|seco`)
-  y abre el navegador por defecto.
-- `ejecutar_app.bat` (doble clic).
+- `python -m telemetria` (o `python -m telemetria gui`) abre la GUI nativa
+  PySide6 con el backend embebido. El subcomando `app` del lanzador de navegador
+  se retiró; el cliente usa `QNetworkAccessManager` y `QWebSocket`.
+- `python -m telemetria pipeline` ejecuta el pipeline offline de la Etapa 1.
+- `ejecutar_app.bat` (doble clic) abre la misma GUI.
 
 ---
 
@@ -215,16 +223,17 @@ El servidor empuja `{tipo:"vivo", …}` cada ~100 ms; el cliente puede pedir
 - [x] Sin AC en pista, `MemoriaAC` no crashea y `GET /api/vivo/layout` responde
       `disponible: false` con un mensaje claro.
 - [x] El modo seco reproduce un CSV por la ruta viva y registra `<nombre>.csv`
-      (esquema exacto) + `<nombre>_verdad.csv`.
+      (esquema exacto + extras); el logger no genera `_verdad.csv`.
 - [x] La ruta viva es coherente con el batch (D13/D14): correlación > 0.97 por
       canal en `speed_kmh`, `wheel_slip_fl`, `temp_core_c_fl`, `wheel_load_n_fl`.
 - [x] El WebSocket emite tramas `tipo:"vivo"` con ventana, degradación y predicción.
-- [x] `python -m telemetria` levanta el backend, arranca la captura y sirve el
-      frontend compilado (abre el navegador por defecto).
-- [x] Suite completa en verde (**142 tests** de Python).
-- [x] Tests de montaje del frontend (**9 tests**, Vitest + jsdom) y extras de la
-      Etapa 2 §3.2 (dispersión/correlación) y §3.5 (fallo de sensores) cerrados.
-- [ ] Validación visual a 60 FPS con 360k muestras (requiere navegador visible).
+- [x] `python -m telemetria` levanta el backend integrado y abre la GUI nativa
+      PySide6 (no hay frontend compilado ni navegador).
+- [x] Suite completa en verde (**200 tests** de Python).
+- [x] Tests de humo de la GUI (**43 tests**, `offscreen`) y extras de la Etapa 2
+      §3.2 (dispersión/correlación) y §3.5 (fallo de sensores) cerrados.
+- [ ] Validación visual fluida con ventanas largas (requiere la GUI con pantalla
+      visible; no se cuenta como hecha con los tests `offscreen`).
 
 ---
 
@@ -263,11 +272,12 @@ El servidor empuja `{tipo:"vivo", …}` cada ~100 ms; el cliente puede pedir
    `limpieza.preprocesar` (test `test_captura_cruda_reprocesable_en_batch`). Esto
    cierra además la hipótesis **D4**: la captura es cruda, así que el batch aplica
    **un solo filtro** (ya no el −6 dB del doble filtrado).
-10. **B4/B5/B9/B10.** `KalmanDegradacion` ganó un método `paso` y el motor mantiene un
-    filtro **incremental** por serie (agregada y por rueda): una rueda que se degrada
-    más tiene su propia predicción (B4) y la vuelta en curso entra con `R` ampliado
-    (B4). `bus.ultimas` usa `islice` (B5), el Welch en vivo interpola los huecos
-    internos (B9) y un retroceso de vuelta reinicia el *stint* (B10).
+10. **B5/B9/B10 (avance parcial).** `KalmanDegradacion` expone `paso`, pero
+    `MotorVivo._predecir` todavía refiltra la serie completa en cada `estado()`:
+    el filtro **incremental**, la predicción por rueda y el `R` ampliado en la
+    vuelta parcial (B4/B5) siguen pendientes. Sí están `bus.ultimas` con `islice`
+    (B5), el Welch en vivo con interpolación de huecos internos (B9) y el
+    reinicio del *stint* al retroceder la vuelta (B10).
 
 ## 8. Fuera de alcance (Etapa 4)
 
