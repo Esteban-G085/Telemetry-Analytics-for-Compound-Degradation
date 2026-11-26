@@ -13,6 +13,8 @@ from __future__ import annotations
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -24,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from telemetria.gui.cliente_api import ApiClient
 from telemetria.gui.dialogo_ayuda import DialogoGuia
+from telemetria.gui.glosario import tooltip
 from telemetria.gui.paleta import (
     ACENTO,
     ACENTO_HOVER,
@@ -190,6 +193,11 @@ class VentanaPrincipal(QMainWindow):
 
         self.api = api or ApiClient()
         self._dialogo_guia: DialogoGuia | None = None
+        # La separación de modos es solo de interfaz: no cambia endpoints ni
+        # claves del backend. 'archivo' es el estado inicial porque la app
+        # arranca ofreciendo un CSV; 'vivo' se activa con el botón o al capturar.
+        self._modo = "archivo"
+        self._ws_conectado = False
         # Fijar la paleta antes de crear cualquier vista: cubre QPalette de Qt
         # (popups, tooltips) y el fondo/ejes de todos los graficos pyqtgraph.
         aplicar_paleta_clara(QApplication.instance())
@@ -211,6 +219,24 @@ class VentanaPrincipal(QMainWindow):
         lay_central = QVBoxLayout(central)
         lay_central.setContentsMargins(16, 12, 16, 12)
         lay_central.setSpacing(12)
+
+        # Aviso permanente del modo. Así nadie intenta usar el WebSocket con
+        # un archivo cargado (ni analizar un CSV mientras captura en vivo).
+        frame_modo = QFrame()
+        frame_modo.setStyleSheet(
+            f"QFrame {{ background: {SELECCION_FONDO}; "
+            f"border: 1px solid {BORDE_SUAVE}; border-radius: 6px; }}"
+        )
+        lay_modo = QHBoxLayout(frame_modo)
+        lay_modo.setContentsMargins(10, 6, 10, 6)
+        self.lbl_modo = QLabel()
+        self.lbl_modo.setWordWrap(True)
+        self.lbl_modo.setToolTip(tooltip("modo_archivo"))
+        lay_modo.addWidget(self.lbl_modo, stretch=1)
+        self.btn_cambiar_modo = QPushButton("Cambiar a modo vivo")
+        self.btn_cambiar_modo.setToolTip(tooltip("modo_vivo"))
+        lay_modo.addWidget(self.btn_cambiar_modo)
+        lay_central.addWidget(frame_modo)
 
         # Panel superior de control de telemetria en vivo
         panel_vivo = QHBoxLayout()
@@ -240,9 +266,10 @@ class VentanaPrincipal(QMainWindow):
 
         # Barra de instrucciones para el usuario
         self.lbl_instrucciones = QLabel(
-            "Tip: carga una sesión en la pestaña 'Sesiones', luego explora "
-            "Espectro, Predicción, Replay, etc. Si es tu primera vez, pulsa "
-            "'Guía rápida'. 'Conectar telemetría (WS)' sirve para datos en vivo."
+            "Tip: carga una sesión en 'Sesiones' y explora Espectro, Predicción "
+            "o Replay. El aviso de arriba dice en qué modo estás: para capturar "
+            "en tiempo real, pulsa 'Cambiar a modo vivo'. La guía rápida "
+            "explica las métricas."
         )
         self.lbl_instrucciones.setWordWrap(True)
         self.lbl_instrucciones.setStyleSheet(f"color: {TEXTO_SUAVE}; font-style: italic; padding: 4px 0;")
@@ -267,15 +294,75 @@ class VentanaPrincipal(QMainWindow):
         self.btn_conectar.clicked.connect(self.api.conectar_telemetria)
         self.btn_desconectar.clicked.connect(self.api.desconectar_telemetria)
         self.btn_guia.clicked.connect(self._abrir_guia)
+        self.btn_cambiar_modo.clicked.connect(self._alternar_modo)
 
         self.api.salud_recibida.connect(self._on_salud)
         self.api.error_salud.connect(self._on_error_salud)
         self.api.estado_telemetria.connect(self._on_estado_ws)
+        self.api.sesion_activa_recibida.connect(
+            lambda _sesion: self._cambiar_modo("archivo")
+        )
+        self.api.vivo_iniciado.connect(lambda _datos: self._cambiar_modo("vivo"))
+
+        self._aplicar_modo()
 
         # Primeras consultas: salud y estado de sesion. El resto de vistas no
         # piden datos dependientes de la sesion hasta recibir sesion_activa.
         self.api.salud()
         self.api.sesion_activa()
+
+    # ------------------------------------------------------------------ Modo
+    def _alternar_modo(self) -> None:
+        self._cambiar_modo("vivo" if self._modo == "archivo" else "archivo")
+
+    def _cambiar_modo(self, modo: str) -> None:
+        if modo not in ("archivo", "vivo"):
+            return
+        if modo == "archivo" and self._ws_conectado:
+            # No dejar un WebSocket abierto mientras se mira un CSV.
+            self.api.desconectar_telemetria()
+        self._modo = modo
+        self._aplicar_modo()
+
+    def _aplicar_modo(self) -> None:
+        """Desactiva lo que no corresponde al modo elegido, sin tocar la API."""
+        vivo = self._modo == "vivo"
+        self.lbl_modo.setText(
+            "Modo vivo: capturando en tiempo real. Las pestañas de archivo "
+            "están desactivadas para no mezclar fuentes."
+            if vivo
+            else "Modo archivo: estás viendo un CSV cargado. El WebSocket y la "
+            "pestaña 'En vivo' están desactivados."
+        )
+        self.lbl_modo.setToolTip(tooltip("modo_vivo" if vivo else "modo_archivo"))
+        self.btn_cambiar_modo.setText(
+            "Cambiar a modo archivo" if vivo else "Cambiar a modo vivo"
+        )
+        self.btn_cambiar_modo.setToolTip(
+            tooltip("modo_archivo" if vivo else "modo_vivo")
+        )
+
+        # Pestaña 1 (Telemetría) queda disponible en ambos modos: es la que
+        # muestra el gráfico, con grupos distintos según la fuente.
+        for indice in range(self.pestanas.count()):
+            permitida = indice in (1, 7) if vivo else (indice != 7)
+            self.pestanas.setTabEnabled(indice, permitida)
+        if not self.pestanas.isTabEnabled(self.pestanas.currentIndex()):
+            self.pestanas.setCurrentIndex(7 if vivo else 0)
+
+        self.btn_conectar.setEnabled(vivo and not self._ws_conectado)
+        self.btn_desconectar.setEnabled(vivo and self._ws_conectado)
+
+        telemetria = self.pestanas.widget(1)
+        grupos = {
+            "grupo_canales": not vivo,
+            "grupo_tiempo_real": vivo,
+            "grupo_ws": vivo,
+        }
+        for nombre, habilitado in grupos.items():
+            grupo = telemetria.findChild(QGroupBox, nombre)
+            if grupo is not None:
+                grupo.setEnabled(habilitado)
 
     # ------------------------------------------------------------------ Slots
     def _abrir_guia(self) -> None:
@@ -296,11 +383,19 @@ class VentanaPrincipal(QMainWindow):
         self.lbl_estado.setStyleSheet(f"color: {ERROR}; font-weight: bold;")
 
     def _on_estado_ws(self, estado: str) -> None:
+        self._ws_conectado = estado == "conectado"
+        if self._modo == "archivo":
+            self.lbl_ws.setText("WebSocket: desactivado en modo archivo")
+            self.lbl_ws.setStyleSheet(f"color: {TEXTO_SUAVE}; font-weight: bold;")
+            self.btn_conectar.setEnabled(False)
+            self.btn_desconectar.setEnabled(False)
+            if self._ws_conectado:
+                self.api.desconectar_telemetria()
+            return
         self.lbl_ws.setText(f"WebSocket: {estado}")
-        conectado = estado == "conectado"
-        self.btn_conectar.setEnabled(not conectado)
-        self.btn_desconectar.setEnabled(conectado)
-        if conectado:
+        self.btn_conectar.setEnabled(not self._ws_conectado)
+        self.btn_desconectar.setEnabled(self._ws_conectado)
+        if self._ws_conectado:
             self.lbl_ws.setStyleSheet(f"color: {EXITO}; font-weight: bold;")
         else:
             self.lbl_ws.setStyleSheet(f"color: {ERROR}; font-weight: bold;")

@@ -17,7 +17,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtWidgets import QApplication, QFrame, QLabel
+from PySide6.QtWidgets import QApplication, QFrame, QGroupBox, QLabel
 
 from telemetria.gui.cliente_api import ApiClient
 from telemetria.gui.reduccion import presupuesto_puntos
@@ -170,6 +170,43 @@ def test_arranca_sin_sesion_sin_textos_de_error(ventana) -> None:
     assert "404" not in sesiones.lbl_activa.text()
     assert "409" not in telemetria.lbl_canales.text()
     assert "404" not in replay.lbl_kpis.text()
+
+
+def test_modo_archivo_desactiva_tiempo_real(ventana, api) -> None:
+    telemetria = ventana.pestanas.widget(1)
+    assert not ventana.pestanas.isTabEnabled(7)
+    assert not ventana.btn_conectar.isEnabled()
+    assert not ventana.btn_desconectar.isEnabled()
+    assert "Modo archivo" in ventana.lbl_modo.text()
+    assert not telemetria.findChild(QGroupBox, "grupo_ws").isEnabled()
+    assert not telemetria.findChild(QGroupBox, "grupo_tiempo_real").isEnabled()
+    assert telemetria.findChild(QGroupBox, "grupo_canales").isEnabled()
+
+    api.sesion_activa_recibida.emit(SESION)
+    assert not ventana.pestanas.isTabEnabled(7)
+    assert "Modo archivo" in ventana.lbl_modo.text()
+
+
+def test_cambiar_a_modo_vivo_desactiva_pestanas_de_archivo(ventana) -> None:
+    assert ventana.btn_cambiar_modo.text() == "Cambiar a modo vivo"
+    ventana.btn_cambiar_modo.click()
+
+    assert "Modo vivo" in ventana.lbl_modo.text()
+    assert ventana.btn_cambiar_modo.text() == "Cambiar a modo archivo"
+    assert ventana.pestanas.isTabEnabled(7)
+    assert ventana.pestanas.isTabEnabled(1)
+    for indice in (0, 2, 3, 4, 5, 6):
+        assert not ventana.pestanas.isTabEnabled(indice)
+    assert ventana.btn_conectar.isEnabled()
+
+    telemetria = ventana.pestanas.widget(1)
+    assert telemetria.findChild(QGroupBox, "grupo_ws").isEnabled()
+    assert telemetria.findChild(QGroupBox, "grupo_tiempo_real").isEnabled()
+    assert not telemetria.findChild(QGroupBox, "grupo_canales").isEnabled()
+
+    ventana.btn_cambiar_modo.click()
+    assert ventana.pestanas.isTabEnabled(6)
+    assert not ventana.pestanas.isTabEnabled(7)
 
 
 def test_todas_las_pestanas_tienen_ayuda_arriba(ventana) -> None:

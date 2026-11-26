@@ -49,6 +49,7 @@ class VistaTelemetria(VistaBase):
 
         # --- Grupo: canales ---
         grp_canales = QGroupBox("Canales disponibles")
+        grp_canales.setObjectName("grupo_canales")
         lay_canales = QVBoxLayout()
         self.lbl_canales = QLabel("Cargando canales...")
         self.lbl_canales.setWordWrap(True)
@@ -72,6 +73,7 @@ class VistaTelemetria(VistaBase):
         self.grafico.setMinimumHeight(350)
 
         grp_grafico = QGroupBox("Grafico en tiempo real")
+        grp_grafico.setObjectName("grupo_tiempo_real")
         lay_grafico = QVBoxLayout()
         lay_grafico.addWidget(self.grafico)
         grp_grafico.setLayout(lay_grafico)
@@ -79,6 +81,7 @@ class VistaTelemetria(VistaBase):
 
         # --- Grupo: mensajes del WebSocket ---
         grp_ws = QGroupBox("Mensajes del WebSocket (/ws/telemetria)")
+        grp_ws.setObjectName("grupo_ws")
         lay_ws = QVBoxLayout()
         self.texto_ws = QTextEdit()
         self.texto_ws.setReadOnly(True)

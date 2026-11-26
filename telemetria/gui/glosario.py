@@ -82,8 +82,17 @@ GLOSARIO: dict[str, str] = {
         "normalizadas muestra cuál va por encima en cada momento."
     ),
     "cursor": (
-        "Cursor: línea que sigue al ratón y muestra el valor de cada señal en "
-        "ese instante."
+        "Cursor: al pasar el ratón por una gráfica aparecen dos guías y una "
+        "caja con la posición exacta y el valor de cada serie con su unidad. "
+        "La caja cambia de lado cerca del borde para no cortarse."
+    ),
+    "modo_archivo": (
+        "Modo archivo: estás viendo un CSV cargado. Las funciones en tiempo "
+        "real (WebSocket y pestaña 'En vivo') quedan desactivadas a propósito."
+    ),
+    "modo_vivo": (
+        "Modo vivo: estás capturando datos ahora. Las pestañas que analizan "
+        "archivos quedan desactivadas para no mezclar dos fuentes distintas."
     ),
     "encuadrar": (
         "Ver toda la vuelta: vuelve a ajustar el eje horizontal al rango "
@@ -125,6 +134,8 @@ TERMINOS: tuple[tuple[str, str], ...] = (
     ("Progreso de vuelta", "progreso"),
     ("Diferencia A − B", "diferencia"),
     ("Cursor", "cursor"),
+    ("Modo archivo", "modo_archivo"),
+    ("Modo vivo", "modo_vivo"),
     ("Rango visible y minimapa", "rango"),
     ("Unidades", "unidades"),
 )
