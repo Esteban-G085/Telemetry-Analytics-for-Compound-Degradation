@@ -32,11 +32,14 @@ def configurar_logging(verboso: bool = False) -> None:
     )
 
 
-def _etiquetas_ventana(feats, verdad, proxy, cfg):
+def _etiquetas_ventana(feats, verdad, proxy, cfg, energia=None):
     """Etiqueta de cada ventana: verdad por muestra, o proxy por vuelta."""
     if verdad is not None:
         return modelo.etiquetas_por_ventana(feats, verdad, cfg)
-    mapa = dict(zip(proxy["lap"], proxy["degradacion_proxy"]))
+    if energia is not None:
+        mapa = dict(zip(energia["lap"], energia["degradacion_energia"]))
+    else:
+        mapa = dict(zip(proxy["lap"], proxy["degradacion_proxy"]))
     return feats["lap"].map(mapa).to_numpy(dtype=float)
 
 
@@ -93,19 +96,35 @@ def correr(entrada, fuente, ruta_config, salida, semilla):
     # --- 4. Etiquetas ---
     verdad = pd.read_csv(ruta_verdad) if ruta_verdad else None
     proxy = etiquetas.proxy_degradacion(df_limpio, cfg, fs=cfg["fs"])
+    fuente_etiqueta = cfg["etiquetas"].get("fuente_etiqueta", "tiempo")
+    energia = (
+        etiquetas.proxy_por_energia(feats, cfg)
+        if fuente_etiqueta == "energia"
+        else None
+    )
     resultado = {"registro": registro, "limpio": df_limpio, "resampleado": intermedios.get("resampleado")}
 
     if verdad is not None:
         y_vuelta_df = etiquetas.verdad_por_vuelta(verdad)
         resultado["calidad_proxy"] = etiquetas.comparar_proxy(proxy, y_vuelta_df)
         log.info("Calidad del proxy vs. verdad: %s", resultado["calidad_proxy"])
+        if energia is not None:
+            energia_comparable = energia.rename(
+                columns={"degradacion_energia": "degradacion_proxy"}
+            )
+            calidad_energia = etiquetas.comparar_proxy(energia_comparable, y_vuelta_df)
+            log.info("Calidad del proxy de energia vs. verdad: %s", calidad_energia)
+    elif energia is not None:
+        y_vuelta_df = energia[["lap", "degradacion_energia"]].rename(
+            columns={"degradacion_energia": "degradacion"}
+        )
     else:
         y_vuelta_df = proxy[["lap", "degradacion_proxy"]].rename(
             columns={"degradacion_proxy": "degradacion"}
         )
     resultado["proxy"] = proxy
 
-    y_ventana = _etiquetas_ventana(feats, verdad, proxy, cfg)
+    y_ventana = _etiquetas_ventana(feats, verdad, proxy, cfg, energia=energia)
 
     # --- 5. Split temporal por vueltas (nunca al azar) ---
     laps_w = feats["lap"].to_numpy()

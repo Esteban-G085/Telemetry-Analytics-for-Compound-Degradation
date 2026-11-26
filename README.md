@@ -518,7 +518,44 @@ Propuesta ordenada por beneficio medido:
 Antes de adoptar cualquiera: repetir el smoke real y
 `tests/test_rendimiento.py`, comparar latencia y memoria, y mantener los tests
 de coherencia API↔pipeline. Ninguno de estos cambios está aplicado en esta
-rama; `requirements.txt`, el backend y el pipeline siguen intactos.
+rama; `requirements.txt`, el backend y las dependencias del pipeline siguen
+intactos.
+
+### Etiquetas alternativas y validación sintética (opcionales, no activas por defecto)
+
+Tres mejoras inspiradas en pitwall y en el paper de tyre energy, añadidas sin tocar
+el backend, las claves JSON ni `config.yaml` (para no alterar `/api/config`). Se
+activan solo con un *override* de configuración en los tests:
+
+- `etiquetas.metodo_proxy = "conjunto"`: estima `k_fuel` y la degradación monotona
+  a la vez (isotónica creciente). Conserva la clave `degradacion_proxy`; añade
+  `k_fuel_ajustado` como diagnóstico interno.
+- `etiquetas.fuente_etiqueta = "energia"`: usa el trabajo de fricción acumulado
+  por vuelta (`proxy_por_energia`, con `slip_energia_*` como respaldo) en lugar
+  del tiempo corregido cuando no hay verdad. Con verdad disponible el modelo
+  sigue entrenando con la verdad; solo se registra la calidad de la energía.
+- `tests/test_recuperacion_sintetica.py`: recupera duraciones, `k_fuel`,
+  correlaciones de ambos proxies y la pendiente seguida por Kalman.
+
+Medición en un stint sintético de 6 vueltas (degradación `0 → 0,5`, `k_fuel =
+0,025 s/kg`, consumo lineal de 10 kg/vuelta):
+
+| Proxy contra la verdad | MAE | Correlación |
+| --- | ---: | ---: |
+| Tiempo corregido (`corregido`, por defecto) | 0,186 | 0,985 |
+| Trabajo de fricción acumulado (`energia`) | 0,256 | 0,9999 |
+
+La correlación mayor de la energía es **circular** (D15): el generador acopla
+slip y desgaste, así que es una demostración del mecanismo, no evidencia de
+generalización. El modo `energia` se ofrece como experimento, no como default.
+
+El ajuste conjunto elige el `k_fuel` mínimo que vuelve creciente la serie
+corregida. Con consumo **no lineal** recupera `0,024` frente a `0,025` inyectado;
+con consumo y degradación lineales ambos efectos son colineales y cae al límite
+inferior de la banda (`0,015`), dejando un proxy plano. La diferencia media
+entre los valores de `delta_s` del proxy fijo y del conjunto en ese caso es de
+`0,333 s`. Por esta razón el modo conjunto también es *opt-in* y el pipeline
+mantiene `metodo_proxy = "corregido"`.
 
 ## Limitaciones conocidas
 
