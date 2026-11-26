@@ -1,47 +1,47 @@
-"""Vista de predicicion: Ridge y Kalman por vuelta con metricas.
+"""Vista de predicción: solo resultados de Ridge y Kalman por vuelta.
 
 Endpoints:
     POST /api/modelos/kalman/estimar
     POST /api/modelos/ridge/ajustar
 
-Muestra las curvas de degradacion estimada junto a la verdad/proxy y una
-tabla de metricas (MAE, etc.).
+Muestra las curvas de degradación estimada junto a la verdad/proxy y una tabla
+de métricas (MAE, RMSE). Los parámetros se ajustan en el Taller de modelos;
+aquí solo se leen y se muestran los resultados.
 """
 
 from __future__ import annotations
 
 import pyqtgraph as pg
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDoubleSpinBox,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
-    QWidget,
 )
 
 from telemetria.gui.cliente_api import ApiClient
 from telemetria.gui.glosario import tooltip
 from telemetria.gui.graficas import CursorGrafico
 from telemetria.gui.paleta import ACENTO, EXITO, TEXTO
+from telemetria.gui.parametros import PARAMETROS_POR_DEFECTO
 from telemetria.gui.vistas.vista_base import VistaBase, error_amigable
 
 
 class VistaPrediccion(VistaBase):
-    """Panel de predicicion de degradacion (Ridge + Kalman)."""
+    """Panel de resultados de la predicción de degradación."""
 
     def __init__(self, api: ApiClient, parent=None) -> None:
         super().__init__(api, parent)
+        self.parametros: dict = dict(PARAMETROS_POR_DEFECTO)
         self._pred_laps: list[int] = []
         self._pred_series: dict[str, dict[int, float]] = {}
         self._construir_ui()
         self._cursor = CursorGrafico(self.grafico)
         self._conectar_senales()
+        self._mostrar_parametros()
         # Kalman/Ridge necesitan una sesion activa; se piden al cargarla.
 
     # ------------------------------------------------------------------ UI
@@ -49,59 +49,34 @@ class VistaPrediccion(VistaBase):
         layout = self._layout
 
         self.agregar_ayuda(
-            "Estima cuánto se desgasta el neumático vuelta a vuelta. La línea "
-            "negra es la referencia (verdad o proxy), la azul marca la "
-            "tendencia de Ridge y la verde suaviza el estado con Kalman. "
-            "MAE y RMSE son el error: cuanto más bajos, mejor. Ajusta los "
-            "parámetros y pulsa <b>Recalcular predicciones</b>."
+            "Aquí solo se ven <b>resultados</b>: la referencia (verdad o proxy), "
+            "la tendencia de Ridge y el suavizado de Kalman. Pasa el ratón por "
+            "la gráfica para leer cada vuelta. Para cambiar Q/R o alpha, ve al "
+            "<b>Taller de modelos</b>; al aplicarlos, estas curvas se recalculan."
         )
 
-        grp_controles = QGroupBox("Parámetros de los modelos")
-        lay = QHBoxLayout()
-
-        self.spin_q_nivel = QDoubleSpinBox()
-        self.spin_q_nivel.setRange(0.0, 1.0)
-        self.spin_q_nivel.setDecimals(6)
-        self.spin_q_nivel.setValue(0.0001)
-        self.spin_q_nivel.setToolTip(tooltip("kalman_q"))
-        lay.addWidget(QLabel("Kalman · nivel (Q):"))
-        lay.addWidget(self.spin_q_nivel)
-
-        self.spin_q_pend = QDoubleSpinBox()
-        self.spin_q_pend.setRange(0.0, 1.0)
-        self.spin_q_pend.setDecimals(6)
-        self.spin_q_pend.setValue(0.00001)
-        self.spin_q_pend.setToolTip(tooltip("kalman_q"))
-        lay.addWidget(QLabel("Kalman · pendiente (Q):"))
-        lay.addWidget(self.spin_q_pend)
-
-        self.spin_r = QDoubleSpinBox()
-        self.spin_r.setRange(0.0, 1.0)
-        self.spin_r.setDecimals(6)
-        self.spin_r.setValue(0.001)
-        self.spin_r.setToolTip(tooltip("kalman_r"))
-        lay.addWidget(QLabel("Kalman · ruido (R):"))
-        lay.addWidget(self.spin_r)
-
-        self.spin_alpha = QDoubleSpinBox()
-        self.spin_alpha.setRange(0.0, 10000.0)
-        self.spin_alpha.setDecimals(3)
-        self.spin_alpha.setValue(0.1)
-        self.spin_alpha.setToolTip(tooltip("alpha"))
-        lay.addWidget(QLabel("Ridge · alpha:"))
-        lay.addWidget(self.spin_alpha)
-
-        self.btn_calcular = QPushButton("Recalcular predicciones")
-        lay.addWidget(self.btn_calcular)
-        lay.addStretch()
-        grp_controles.setLayout(lay)
-        layout.addWidget(grp_controles)
+        grp_resumen = QGroupBox("Parámetros usados (ajustables en Taller de modelos)")
+        lay_r = QHBoxLayout()
+        self.lbl_parametros = QLabel()
+        self.lbl_parametros.setWordWrap(True)
+        self.lbl_parametros.setToolTip(tooltip("alpha"))
+        lay_r.addWidget(self.lbl_parametros, stretch=1)
+        self.btn_actualizar = QPushButton("Actualizar resultados")
+        self.btn_actualizar.setToolTip(
+            "Vuelve a pedir Ridge y Kalman con los parámetros vigentes."
+        )
+        lay_r.addWidget(self.btn_actualizar)
+        # Alias conservado por código y pruebas antiguas.
+        self.btn_calcular = self.btn_actualizar
+        grp_resumen.setLayout(lay_r)
+        layout.addWidget(grp_resumen)
 
         self.grafico = pg.PlotWidget()
         self.grafico.setLabel("left", "Degradacion")
         self.grafico.setLabel("bottom", "Vuelta")
         self.grafico.showGrid(x=True, y=True)
         self.grafico.setTitle("Predicción de degradación (sin datos)")
+        self.grafico.setToolTip(tooltip("cursor"))
 
         self.curva_verdad = self.grafico.plot(
             pen=pg.mkPen("k", width=2), name="Verdad / proxy"
@@ -154,7 +129,7 @@ class VistaPrediccion(VistaBase):
 
     # ------------------------------------------------------------------ Senales
     def _conectar_senales(self) -> None:
-        self.btn_calcular.clicked.connect(self._solicitar_predicciones)
+        self.btn_actualizar.clicked.connect(self._solicitar_predicciones)
 
         self.api.kalman_recibido.connect(self._mostrar_kalman)
         self.api.error_kalman.connect(self._mostrar_error_kalman)
@@ -167,14 +142,30 @@ class VistaPrediccion(VistaBase):
         """Recalcular modelos cuando cambia la sesion activa."""
         self._solicitar_predicciones()
 
-    def _solicitar_predicciones(self) -> None:
-        self.api.kalman(
-            q_nivel=self.spin_q_nivel.value(),
-            q_pendiente=self.spin_q_pend.value(),
-            r=self.spin_r.value(),
-            monotono=True,
+    def aplicar_parametros(self, parametros: dict) -> None:
+        """El Taller envia aqui los valores; esta vista solo recalcula."""
+        self.parametros.update(dict(parametros or {}))
+        self._mostrar_parametros()
+        self._solicitar_predicciones()
+
+    def _mostrar_parametros(self) -> None:
+        p = self.parametros
+        self.lbl_parametros.setText(
+            f"Kalman: Q nivel {p['q_nivel']:g}, Q pendiente "
+            f"{p['q_pendiente']:g}, R {p['r']:g}, monótono "
+            f"{'sí' if p['monotono'] else 'no'} · Ridge: alpha {p['alpha']:g}. "
+            "Cámbialos en el Taller de modelos."
         )
-        self.api.ridge(alpha=self.spin_alpha.value())
+
+    def _solicitar_predicciones(self) -> None:
+        p = self.parametros
+        self.api.kalman(
+            q_nivel=p["q_nivel"],
+            q_pendiente=p["q_pendiente"],
+            r=p["r"],
+            monotono=p["monotono"],
+        )
+        self.api.ridge(alpha=p["alpha"])
 
     def _mostrar_kalman(self, datos: dict) -> None:
         self._dibujar_curva("kalman", datos, self.curva_kalman)

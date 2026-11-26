@@ -282,13 +282,19 @@ class VentanaPrincipal(QMainWindow):
         self.pestanas.addTab(VistaTelemetria(self.api), "Telemetria")
         self.pestanas.addTab(VistaEspectro(self.api), "Espectro")
         self.pestanas.addTab(VistaPrediccion(self.api), "Prediccion")
-        self.pestanas.addTab(VistaLaboratorio(self.api), "Laboratorio")
+        self.pestanas.addTab(VistaLaboratorio(self.api), "Taller de modelos")
         self.pestanas.addTab(VistaRobustez(self.api), "Robustez")
         self.pestanas.addTab(VistaReplay(self.api), "Replay")
         self.pestanas.addTab(VistaVivo(self.api), "En vivo")
         lay_central.addWidget(self.pestanas)
 
         self.setCentralWidget(central)
+
+        # El Taller concentra los parámetros; Predicción solo recalcula y
+        # muestra resultados con lo que recibe de él.
+        self.pestanas.widget(4).parametros_cambiados.connect(
+            self.pestanas.widget(3).aplicar_parametros
+        )
 
         # ------------------------------------------------------------------ Senales
         self.btn_conectar.clicked.connect(self.api.conectar_telemetria)

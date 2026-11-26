@@ -577,7 +577,7 @@ def test_prediccion_y_robustez_usan_nombres_claros(ventana, api) -> None:
     assert prediccion.tabla.horizontalHeaderItem(1).text() == "Error medio (MAE)"
     assert prediccion.tabla.horizontalHeaderItem(2).text() == "Error grande (RMSE)"
     assert prediccion.tabla.horizontalHeaderItem(1).toolTip()
-    assert prediccion.spin_alpha.toolTip()
+    assert not hasattr(prediccion, "spin_alpha")
 
     laboratorio = ventana.pestanas.widget(4)
     etiquetas_lab = [lbl.text() for lbl in laboratorio.findChildren(QLabel)]
@@ -585,9 +585,11 @@ def test_prediccion_y_robustez_usan_nombres_claros(ventana, api) -> None:
         "Kalman · nivel (Q):",
         "Kalman · pendiente (Q):",
         "Kalman · ruido (R):",
+        "Ridge · alpha:",
     ):
         assert esperada in etiquetas_lab
     assert laboratorio.spin_q_nivel.toolTip()
+    assert laboratorio.spin_alpha.toolTip()
 
     robustez = ventana.pestanas.widget(5)
     assert robustez.tabla_sensores.horizontalHeaderItem(3).text() == "Subida del error ↑"
@@ -858,3 +860,58 @@ def test_cursor_se_oculta_fuera_del_grafico(ventana, api) -> None:
 
     replay._mover_cursor_comparacion(QPointF(-10000.0, -10000.0))
     assert not replay._lectura_cursor.isVisible()
+
+
+def test_taller_centraliza_parametros_y_prediccion_solo_resultados(
+    ventana, api
+) -> None:
+    assert ventana.pestanas.tabText(4) == "Taller de modelos"
+    taller = ventana.pestanas.widget(4)
+    prediccion = ventana.pestanas.widget(3)
+
+    assert taller.spin_alpha.toolTip()
+    taller.spin_alpha.setValue(0.5)
+    taller.btn_aplicar.click()
+    assert prediccion.parametros["alpha"] == 0.5
+    assert "alpha 0.5" in prediccion.lbl_parametros.text()
+
+    api.features_recibidas.emit(
+        ["slip_mean_fl", "temp_max_fr", "psd_alta_rr", "otra_feature"]
+    )
+    nombres = [
+        taller.lista_features.item(i).text()
+        for i in range(taller.lista_features.count())
+    ]
+    assert nombres == ["slip_mean_fl", "temp_max_fr", "psd_alta_rr", "otra_feature"]
+    assert "delantera izquierda" in taller.lista_features.item(0).toolTip()
+    assert "banda alta" in taller.lista_features.item(2).toolTip()
+
+    api.config_recibida.emit(
+        {
+            "config": {
+                "modelo": {
+                    "kalman": {
+                        "q_nivel": 0.0002,
+                        "q_pendiente": 0.00001,
+                        "r": 0.001,
+                        "monotono": True,
+                    },
+                    "ridge_alphas": [0.5],
+                }
+            }
+        }
+    )
+    cabeceras = [
+        taller.tabla_config.horizontalHeaderItem(i).text()
+        for i in range(taller.tabla_config.columnCount())
+    ]
+    assert cabeceras == ["Parámetro", "Guardado", "En pantalla", "Resultado"]
+    filas = [
+        [
+            taller.tabla_config.item(fila, columna).text()
+            for columna in range(taller.tabla_config.columnCount())
+        ]
+        for fila in range(taller.tabla_config.rowCount())
+    ]
+    assert any(fila[0] == "Ridge · alpha" and fila[1] == "0.5" for fila in filas)
+    assert any(fila[0] == "Kalman · nivel (Q)" and fila[1] == "0.0002" for fila in filas)

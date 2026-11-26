@@ -94,15 +94,16 @@ PROYECTO/
 │           └── serializacion.py       # numpy -> JSON/Float32
 │   └── gui/                  # interfaz nativa (PySide6): 8 pestañas
 │       ├── main.py           # arranca uvicorn en hilo + QApplication
-│       ├── ventana_principal.py
+│       ├── ventana_principal.py  # modos archivo/vivo y barra de estado
 │       ├── etiquetas_canales.py  # nombres legibles y columnas de contexto ocultas
-│       ├── glosario.py       # definiciones de métricas para tooltips y guía
+│       ├── glosario.py       # definiciones de métricas y modos para tooltips
+│       ├── parametros.py     # defaults y etiquetas compartidas Taller/Predicción
 │       ├── dialogo_ayuda.py  # «Guía rápida» no modal
 │       ├── cliente_api.py    # REST (httpx) + WS (QWebSocket) en hilos de fondo
 │       ├── reduccion.py      # presupuesto adaptativo + LTTB local para gráficas
-│       ├── graficas.py       # minimapa, rango visible y botón de encuadre
+│       ├── graficas.py       # minimapa limitado, rango visible y cursor común
 │       └── vistas/           # sesiones, telemetria, espectro, prediccion,
-│                             # laboratorio, robustez, replay, vivo
+│                             # taller, robustez, replay, vivo
 ├── data/
 │   ├── raw/                  # CSV crudos + *_verdad.csv (verdad simulada)
 │   ├── processed/            # señal limpia (csv.gz), importancias.csv, modelo_ridge.joblib
@@ -262,8 +263,8 @@ Antes de cargar una sesión muestran «Sin sesión activa» en lugar de errores 
 | 1 | **Sesiones** | Lista de CSV, carga de sesión y resumen (vueltas, muestras). |
 | 2 | **Telemetría** | Canales disponibles, gráfico de tramas binarias del WS y mensajes de control. |
 | 3 | **Espectro** | PSD de Welch (crudo vs. limpio) del canal y vuelta elegidos, con bandas Baja/Media/Alta etiquetadas. |
-| 4 | **Predicción** | Verdad/proxy, Ridge y Kalman por vuelta, tabla de error medio (MAE) y error grande (RMSE), con α y Q/R explicados. |
-| 5 | **Laboratorio** | Q/R de Kalman, configuración activa y features; guardar/restablecer config. |
+| 4 | **Predicción** | Solo resultados: verdad/proxy, Ridge y Kalman por vuelta, tabla de error medio (MAE) y error grande (RMSE). |
+| 5 | **Taller de modelos** | Todos los parámetros (Q/R/monotonía y α), tabla antes/después de la configuración y features explicadas. |
 | 6 | **Robustez** | Error frente al ruido (SNR), error sin fallos y subida del error ↑ al desconectar sensores. |
 | 7 | **Replay** | Comparador de varias señales de una vuelta (cursor, progreso %, diferencia A − B, minimapa y ejes con unidades) + detalle crudo/limpio, outliers y tarjetas de calidad. |
 | 8 | **En vivo** | Captura AC/modo seco, estado del motor y osciloscopio del WS de vivo. |
@@ -278,15 +279,20 @@ ofrecen como señales porque son el eje temporal y el agrupador de vueltas. En
 **Replay** se pueden comparar varias señales de la misma vuelta con color estable
 según el orden elegido, atajos preparados, selección manual, normalización 0–1,
 eje de progreso, diferencia A − B, cursor con lectura de valores, minimapa con
-el rango visible y botón de encuadre, sin perder el panel de detalle. Los ejes
+el rango visible y botón de encuadre, sin perder el panel de detalle. El zoom
+está limitado a los datos reales y el cursor (también en Predicción y Espectro)
+muestra posición, unidades y valores sin cortarse en los bordes. Los ejes
 Y muestran la unidad real de cada señal (o 0–1 al normalizar). Las gráficas piden de 900 a 6000
 puntos según su ancho, cachean la vuelta y reducen con LTTB al hacer zoom:
 en el smoke real el payload baja de 94,0 KB a 19,3 KB para dos señales, sin
 tocar el backend. Las tarjetas **Muestras válidas**, **Descartadas** y
 **Calidad (%)** resumen la vuelta completa, no los puntos dibujados.
 
-El panel superior permite conectar/desconectar el WebSocket `/ws/telemetria`.
-En la pestaña **En vivo**, al iniciar una captura se abre automáticamente
+El aviso superior indica el **modo archivo** o **modo vivo** y desactiva los
+controles de la otra fuente: con un CSV cargado no se puede usar el WebSocket
+ni la pestaña **En vivo**; con el botón **Cambiar a modo vivo** ocurre al revés.
+El panel superior permite conectar/desconectar `/ws/telemetria` solo en modo
+vivo. En la pestaña **En vivo**, al iniciar una captura se abre automáticamente
 `/api/vivo/stream` (~10 Hz) para el osciloscopio. Detalles en `GUI_USO.md`.
 
 > Las gráficas usan **pyqtgraph**. Al actualizar una curva conviene pasar siempre
@@ -299,7 +305,7 @@ En la pestaña **En vivo**, al iniciar una captura se abre automáticamente
 python -m pytest -q
 ```
 
-**172 tests** de Python en verde (incluidos 25 de humo de la GUI en modo `offscreen`).
+**179 tests** de Python en verde (incluidos 32 de humo de la GUI en modo `offscreen`).
 Cobertura por área:
 
 | Fichero | Qué cubre |
@@ -316,7 +322,7 @@ Cobertura por área:
 | `tests/test_motor_vivo.py` | Degradación desde grip auto-calibrado, predicción Kalman (agregada y **por rueda**) y logger CSV. |
 | `tests/test_vivo_api.py` | Endpoints `/api/vivo/*` y el WebSocket `/api/vivo/stream` (incluye detener bajo carga). |
 | `tests/test_coherencia_live_batch.py` | **D14**: la ruta en vivo (outliers causales + filtro + decimación) reproduce la señal del pipeline batch con correlación > 0.97. Incluye el reprocesado del **CSV crudo** del logger en batch (logger → batch, A1/C/D4). |
-| `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay (orden estable, normalización, progreso %, diferencia A − B, cursor, encuadre, minimapa, rango visible, unidades de ejes, presupuesto adaptativo, zoom sin petición y caché); también cubre la «Guía rápida», las tarjetas de calidad, las cabeceras claras de métricas y las etiquetas de bandas. |
+| `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay (orden estable, normalización, progreso %, diferencia A − B, cursor, encuadre, minimapa limitado, rango visible, unidades de ejes, presupuesto adaptativo, zoom sin petición y caché); también cubre los modos archivo/vivo, el Taller de modelos, el cursor en Espectro/Predicción, la «Guía rápida», las tarjetas de calidad, las cabeceras claras de métricas y las etiquetas de bandas. |
 | `tests/test_reduccion.py` | LTTB multicanal: conserva extremos y picos de cualquier señal, comparte índices entre series y respeta el presupuesto de puntos. |
 
 Latencia medida contra `uvicorn` real (caché caliente): REST ≈ 13 ms, Kalman por WS ≈ 3 ms,
@@ -440,10 +446,11 @@ El backend, la GUI de escritorio y el lanzador están completos:
 
 - [x] **Backend** (`telemetria/api/`, FastAPI REST + WebSocket).
 - [x] **GUI** (`telemetria/gui/`, PySide6 + pyqtgraph): las **ocho pestañas** —
-      1 sesiones, 2 telemetría, 3 espectro, 4 predicción, 5 laboratorio,
+      1 sesiones, 2 telemetría, 3 espectro, 4 predicción, 5 taller de modelos,
       6 robustez, 7 replay, 8 en vivo. Con ayuda siempre visible, nombres
       legibles para las señales, comparador multi-señal en Replay con minimapa
-      y ejes con unidades, botón **Guía rápida** no modal con glosario,
+      limitado y ejes con unidades, cursor en Replay/Espectro/Predicción,
+      modos archivo/vivo separados, botón **Guía rápida** no modal con glosario,
       tarjetas de calidad y métricas con nombres autoexplicativos (bandas
       etiquetadas incluidas).
 - [x] **App local** (`python -m telemetria` + `ejecutar_app.bat`) que abre la
@@ -462,6 +469,27 @@ Extras del plan §3.2 y §3.5:
 
 Queda como mejora opcional la **validación visual a 60 FPS con 360k muestras**;
 el pipeline y la API ya están cubiertos por tests de rendimiento y coherencia.
+
+### Aceleradores opcionales de otros lenguajes (propuesta, no aplicados)
+
+El proyecto ya usa NumPy/pandas vectorizados, orjson y LTTB en la GUI, así que
+**no hace falta reescribirlo**. Si aparece un cuello de botella medido, la
+propuesta ordenada por coste/beneficio es:
+
+1. **Polars** para la limpieza/features por ventana y las agregaciones por
+   vuelta (sustituye pandas solo en el punto caliente; mismo DataFrame de
+   entrada/salida). Es el cambio con menor fricción y suele acelerar grupos y
+   ventanas grandes.
+2. **DuckDB** para consultas sobre los CSV crudos (`data/raw/`) y el filtrado
+   por vuelta/canal antes de cargar todo en memoria. Útil si el problema es
+   leer `sim_42.csv` (~334 MB), no calcular.
+3. **Rust/Go/Cython** solo como última opción, y únicamente para una función
+   concreta que el perfilado marque como dominante (por ejemplo LTTB o el
+   detector causal de outliers), detrás de la misma firma Python.
+
+Antes de adoptar cualquiera: medir con el smoke real y con
+`tests/test_rendimiento.py`, comparar latencia y memoria, y mantener los tests
+de coherencia API↔pipeline. Ninguno de estos cambios está aplicado en esta rama.
 
 ## Limitaciones conocidas
 
