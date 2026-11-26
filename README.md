@@ -263,18 +263,20 @@ Antes de cargar una sesión muestran «Sin sesión activa» en lugar de errores 
 | 4 | **Predicción** | Verdad/proxy, Ridge y Kalman por vuelta, tabla de error medio (MAE) y error grande (RMSE), con α y Q/R explicados. |
 | 5 | **Laboratorio** | Q/R de Kalman, configuración activa y features; guardar/restablecer config. |
 | 6 | **Robustez** | Error frente al ruido (SNR), error sin fallos y subida del error ↑ al desconectar sensores. |
-| 7 | **Replay** | Comparador de varias señales de una vuelta + detalle crudo/limpio, outliers y tarjetas de calidad. |
+| 7 | **Replay** | Comparador de varias señales de una vuelta (cursor, progreso %, diferencia A − B) + detalle crudo/limpio, outliers y tarjetas de calidad. |
 | 8 | **En vivo** | Captura AC/modo seco, estado del motor y osciloscopio del WS de vivo. |
 
 Cada pestaña lleva arriba un bloque «Qué estás viendo» siempre visible. El botón
 **Guía rápida** de la barra superior abre un diálogo no modal con el flujo básico
 y un glosario de MAE, RMSE, SNR, outlier, PSD, Welch, bandas, α, Q/R, verdad/proxy
-y calidad; los mismos textos aparecen en los tooltips. Los selectores muestran
-nombres como «Acelerador» o «Deslizamiento FL (delantera izquierda)» en lugar de
-claves internas; `timestamp_s` y `lap` no se ofrecen como señales porque son el
-eje temporal y el agrupador de vueltas. En **Replay** se pueden comparar varias
-señales de la misma vuelta (atajos preparados, selección manual y normalización
-0–1) sin perder el panel de detalle, y las tarjetas **Muestras válidas**,
+y calidad, progreso, diferencia y cursor; los mismos textos aparecen en los
+tooltips. Los selectores muestran nombres como «Acelerador» o «Deslizamiento FL
+(delantera izquierda)» en lugar de claves internas; `timestamp_s` y `lap` no se
+ofrecen como señales porque son el eje temporal y el agrupador de vueltas. En
+**Replay** se pueden comparar varias señales de la misma vuelta con color estable
+según el orden elegido, atajos preparados, selección manual, normalización 0–1,
+eje de progreso, diferencia A − B, cursor con lectura de valores y botón de
+encuadre, sin perder el panel de detalle. Las tarjetas **Muestras válidas**,
 **Descartadas** y **Calidad (%)** resumen la calidad de la vuelta.
 
 El panel superior permite conectar/desconectar el WebSocket `/ws/telemetria`.
@@ -291,7 +293,7 @@ En la pestaña **En vivo**, al iniciar una captura se abre automáticamente
 python -m pytest -q
 ```
 
-**160 tests** de Python en verde (incluidos 17 de humo de la GUI en modo `offscreen`).
+**163 tests** de Python en verde (incluidos 20 de humo de la GUI en modo `offscreen`).
 Cobertura por área:
 
 | Fichero | Qué cubre |
@@ -308,7 +310,7 @@ Cobertura por área:
 | `tests/test_motor_vivo.py` | Degradación desde grip auto-calibrado, predicción Kalman (agregada y **por rueda**) y logger CSV. |
 | `tests/test_vivo_api.py` | Endpoints `/api/vivo/*` y el WebSocket `/api/vivo/stream` (incluye detener bajo carga). |
 | `tests/test_coherencia_live_batch.py` | **D14**: la ruta en vivo (outliers causales + filtro + decimación) reproduce la señal del pipeline batch con correlación > 0.97. Incluye el reprocesado del **CSV crudo** del logger en batch (logger → batch, A1/C/D4). |
-| `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay; también cubre la «Guía rápida», las tarjetas de calidad, las cabeceras claras de métricas y las etiquetas de bandas. |
+| `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay (orden estable, normalización, progreso %, diferencia A − B, cursor y encuadre); también cubre la «Guía rápida», las tarjetas de calidad, las cabeceras claras de métricas y las etiquetas de bandas. |
 
 Latencia medida contra `uvicorn` real (caché caliente): REST ≈ 13 ms, Kalman por WS ≈ 3 ms,
 re-fit de Ridge por WS ≈ 16 ms.

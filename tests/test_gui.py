@@ -343,6 +343,84 @@ def test_replay_normaliza_distintas_unidades(ventana, api) -> None:
         y = curva.getData()[1]
         assert min(y) == pytest.approx(0.0)
         assert max(y) == pytest.approx(1.0)
+    assert replay._curvas_comparar["throttle"].name() == "Acelerador (10.00–30.00)"
+
+
+def test_replay_comparacion_respeta_el_orden_elegido(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(6)
+
+    # PySide entrega el dict ordenado por clave ('brake' antes que 'throttle').
+    api.vuelta_comparar_recibida.emit(
+        {
+            "lap": 1,
+            "t": [0.0, 1.0, 2.0],
+            "series": {
+                "brake": [1.0, 0.0, 0.5],
+                "throttle": [0.0, 1.0, 0.5],
+            },
+        }
+    )
+    assert list(replay._curvas_comparar) == ["throttle", "brake"]
+    color_throttle = replay._curvas_comparar["throttle"].opts["pen"].color().name()
+    color_brake = replay._curvas_comparar["brake"].opts["pen"].color().name()
+    assert color_throttle != color_brake
+
+
+def test_replay_progreso_y_diferencia(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(6)
+    api.vuelta_comparar_recibida.emit(
+        {
+            "lap": 1,
+            "t": [0.0, 1.0, 2.0],
+            "series": {
+                "throttle": [0.0, 1.0, 0.5],
+                "brake": [1.0, 0.0, 0.5],
+            },
+        }
+    )
+
+    replay.chk_progreso.setChecked(True)
+    assert replay._curvas_comparar["throttle"].getData()[0] == pytest.approx(
+        [0.0, 50.0, 100.0]
+    )
+    etiqueta_x = replay.grafico_comparar.getPlotItem().getAxis("bottom").labelText
+    assert "Progreso" in etiqueta_x
+
+    replay.chk_diferencia.setChecked(True)
+    assert replay._curva_diferencia is not None
+    assert replay._curva_diferencia.getData()[1] == pytest.approx([-1.0, 1.0, 0.0])
+
+
+def test_replay_cursor_y_encuadre(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(6)
+    api.vuelta_comparar_recibida.emit(
+        {
+            "lap": 1,
+            "t": [0.0, 1.0, 2.0],
+            "series": {
+                "throttle": [10.0, 20.0, 30.0],
+                "brake": [100.0, 200.0, 300.0],
+            },
+        }
+    )
+
+    pos = replay.grafico_comparar.plotItem.sceneBoundingRect().center()
+    replay._mover_cursor_comparacion(pos)
+    assert replay._lectura_cursor is not None
+    texto = replay._lectura_cursor.toPlainText()
+    assert "Acelerador" in texto
+    assert "Freno" in texto
+
+    replay.grafico_comparar.setXRange(0.4, 0.6)
+    replay.btn_encuadrar.click()
+    x_min, x_max = replay.grafico_comparar.plotItem.vb.viewRange()[0]
+    assert (x_min, x_max) == pytest.approx((0.0, 2.0), abs=0.1)
 
 
 def test_vivo_llena_archivos_y_layout(ventana, api) -> None:

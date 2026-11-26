@@ -72,6 +72,23 @@ GLOSARIO: dict[str, str] = {
         "Calidad: porcentaje de muestras de la vuelta que el pipeline marcó "
         "como válidas."
     ),
+    "progreso": (
+        "Progreso de vuelta: porcentaje recorrido desde el inicio (0 %) hasta "
+        "el final (100 %). Permite comparar señales aunque las vueltas duren "
+        "distinto."
+    ),
+    "diferencia": (
+        "Diferencia A − B: resta de las dos señales seleccionadas. Con señales "
+        "normalizadas muestra cuál va por encima en cada momento."
+    ),
+    "cursor": (
+        "Cursor: línea que sigue al ratón y muestra el valor de cada señal en "
+        "ese instante."
+    ),
+    "encuadrar": (
+        "Ver toda la vuelta: vuelve a ajustar el eje horizontal al rango "
+        "completo de la vuelta cargada."
+    ),
 }
 
 # (nombre visible, clave en GLOSARIO) para la guía rápida.
@@ -90,6 +107,9 @@ TERMINOS: tuple[tuple[str, str], ...] = (
     ("Vuelta", "vuelta"),
     ("Downsample", "downsample"),
     ("Calidad", "calidad"),
+    ("Progreso de vuelta", "progreso"),
+    ("Diferencia A − B", "diferencia"),
+    ("Cursor", "cursor"),
 )
 
 

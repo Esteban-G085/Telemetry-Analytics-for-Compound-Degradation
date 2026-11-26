@@ -77,7 +77,13 @@ no hay textos blancos sobre fondos claros.
   es el agrupador de vueltas. Aparecen en la lista de canales de **Telemetría**,
   pero no se ofrecen como «señal para dibujar» en **Espectro** ni en **Replay**.
 - **Leyendas y colores.** Las gráficas de Espectro y Predicción llevan leyenda.
-  En Replay, cada señal del comparador tiene un color fijo y distinto.
+  En Replay, cada señal del comparador tiene un color fijo y distinto, asignado
+  en el orden en que la marcaste (no por orden alfabético de la API).
+- **Eje y cursor.** En el comparador de Replay puedes alternar entre
+  **Tiempo (s)** y **Progreso de vuelta (%)**. Al mover el ratón sobre la
+  gráfica aparece un cursor con el instante y el valor de cada señal; si está
+  activada la normalización, el cursor muestra también el valor original y el
+  normalizado. **Ver toda la vuelta** restaura el zoom al rango completo.
 
 ## Comparar señales en Replay
 
@@ -88,7 +94,13 @@ La pestaña **Replay** tiene dos zonas:
    señales; también hay atajos para velocidad+slip y temperaturas por rueda, o
    puedes marcarlas una a una en la lista. La casilla **Normalizar señales**
    escala cada curva entre 0 y 1: es útil para comparar la *forma* de señales con
-   unidades distintas (por ejemplo, acelerador en % y temperatura en °C).
+   unidades distintas (por ejemplo, acelerador en % y temperatura en °C); la
+   leyenda y el cursor recuerdan el rango original. **Progreso de vuelta (%)**
+   cambia el eje horizontal de segundos a porcentaje recorrido, **Diferencia
+   A − B** dibuja una curva punteada con la resta cuando hay exactamente dos
+   señales marcadas, y **Ver toda la vuelta** vuelve a encuadrar el eje tras
+   hacer zoom. Todas las señales comparten el mismo eje temporal y el cursor
+   sincronizado.
 2. **Detalle de una señal** (abajo). Muestra la señal original frente a la
    filtrada y los puntos descartados. Encima hay tres tarjetas: **Muestras
    válidas**, **Descartadas** y **Calidad (%)** (porcentaje de muestras marcadas
@@ -104,7 +116,7 @@ comparador no pisa el gráfico de detalle.
 | `main.py` | Punto de entrada: arranca backend + ventana |
 | `paleta.py` | Paleta clara única aplicada a Qt (QPalette) y pyqtgraph; colores de serie y de banda. |
 | `etiquetas_canales.py` | Traduce las claves de la API a nombres legibles y oculta las columnas de contexto. |
-| `glosario.py` | Definiciones únicas de MAE, RMSE, SNR, outlier, PSD, bandas, α, Q/R y calidad para tooltips y guía. |
+| `glosario.py` | Definiciones únicas de MAE, RMSE, SNR, outlier, PSD, bandas, α, Q/R, calidad, progreso, diferencia y cursor para tooltips y guía. |
 | `dialogo_ayuda.py` | «Guía rápida»: diálogo no modal con el paso a paso y el glosario. |
 | `cliente_api.py` | Cliente REST (httpx) + WebSocket (QWebSocket). Todas las peticiones van a un hilo de fondo para no congelar la ventana. |
 | `ventana_principal.py` | `QMainWindow`: barra de estado del backend, botón «Guía rápida», 8 pestañas y panel conectar/desconectar WebSocket. |
@@ -115,7 +127,7 @@ comparador no pisa el gráfico de detalle.
 | `vistas/v_prediccion.py` | Predicción de degradación (Ridge + Kalman) con métricas. |
 | `vistas/v_laboratorio.py` | Parámetros Q/R de Kalman, gestión de configuración y features. El alpha de Ridge está en Predicción. |
 | `vistas/v_robustez.py` | MAE vs SNR y simulador de fallo de sensores. |
-| `vistas/v_replay.py` | Replay de una vuelta: comparador multi-señal y detalle crudo vs. limpio con outliers y KPIs. |
+| `vistas/v_replay.py` | Replay de una vuelta: comparador multi-señal con cursor, progreso %, diferencia A − B y encuadre; detalle crudo vs. limpio con outliers y KPIs. |
 | `vistas/v_vivo.py` | Captura en vivo: iniciar/detener, estado, osciloscopio. |
 
 ## Pestañas disponibles
@@ -128,7 +140,7 @@ comparador no pisa el gráfico de detalle.
 | 4 | **Predicción** | Degradación estimada (Ridge, Kalman), error medio (MAE) y error grande (RMSE) | `POST /api/modelos/kalman/estimar`, `POST /api/modelos/ridge/ajustar` |
 | 5 | **Laboratorio** | Q/R de Kalman, guardar/restablecer config, features (α está en Predicción) | `GET/POST/DELETE /api/config`, `GET /api/modelos/features` |
 | 6 | **Robustez** | Error frente al ruido (SNR), error sin fallos y subida del error ↑ al desconectar sensores | `POST /api/modelos/robustez`, `POST /api/modelos/sensores` |
-| 7 | **Replay** | Comparador de varias señales + detalle crudo/limpio, outliers y tarjetas de calidad | `GET /api/telemetria/vuelta/{lap}` |
+| 7 | **Replay** | Comparador de varias señales (cursor, progreso %, diferencia A − B) + detalle crudo/limpio, outliers y tarjetas de calidad | `GET /api/telemetria/vuelta/{lap}` |
 | 8 | **En vivo** | Captura desde AC o CSV, estado, osciloscopio | `POST/GET /api/vivo/*` |
 
 El panel superior permite conectar/desconectar el WebSocket de telemetría en
@@ -160,13 +172,14 @@ escritorio.
 .venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider
 ```
 
-Incluye 17 tests de humo de la GUI en modo `offscreen`: comprueban que arranca
-sin sesión, que se refresca al cargar una, que las 8 pestañas tienen ayuda
-visible, que los selectores usan nombres amables y ocultan las columnas de
-contexto, y que el comparador de Replay dibuja varias señales (también
-normalizadas). También cubren la **Guía rápida**, las tarjetas de calidad de
-Replay, las cabeceras claras de métricas y las etiquetas de las bandas del
-espectro.
+**163 tests** en total, de los cuales **20** son de humo de la GUI en modo
+`offscreen`. Comprueban que arranca sin sesión, que se refresca al cargar una,
+que las 8 pestañas tienen ayuda visible, que los selectores usan nombres
+amables y ocultan las columnas de contexto, y que el comparador de Replay
+dibuja varias señales (también normalizadas). También cubren la **Guía rápida**,
+las tarjetas de calidad de Replay, las cabeceras claras de métricas y las
+etiquetas de las bandas del espectro, además del orden estable de colores, el
+eje de progreso, la curva de diferencia, el cursor y el botón de encuadre.
 
 ## Mejora opcional
 
