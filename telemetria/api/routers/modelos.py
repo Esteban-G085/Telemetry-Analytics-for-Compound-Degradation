@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -36,6 +38,7 @@ class SensorCaido(BaseModel):
 
 class EntradaSensores(BaseModel):
     caidos: list[SensorCaido] = []
+    modo: Literal["combinado", "individual"] = "combinado"
 
 
 def _sesion(cache: CacheMemoria):
@@ -102,7 +105,9 @@ async def sensores(entrada: EntradaSensores, cache: CacheMemoria = Depends(cache
     sesion = _sesion(cache)
     caidos = [{"canal": s.canal, "rueda": s.rueda} for s in entrada.caidos]
     try:
-        return await run_in_threadpool(analisis.sensores, sesion, caidos)
+        return await run_in_threadpool(
+            analisis.sensores, sesion, caidos, modo=entrada.modo
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

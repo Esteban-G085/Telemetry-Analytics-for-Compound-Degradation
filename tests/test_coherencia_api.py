@@ -122,14 +122,17 @@ def test_coherencia_del_espectro(cliente):
 
     x = sesion.limpio[canal].to_numpy(dtype=float)
     x = x[np.isfinite(x)]
-    n = int(min(sesion.cfg["features"]["welch_nperseg"], len(x)))
+    solicitado = int(sesion.cfg["features"]["welch_nperseg"])
+    n = int(min(solicitado, len(x)))
     freqs, psd = welch(x, fs=sesion.fs, nperseg=n, noverlap=n // 2)
 
     np.testing.assert_allclose(np.array(j["freqs"]), freqs, atol=1e-9)
     np.testing.assert_allclose(
         np.array(j["psd_limpio_db"]), 10 * np.log10(np.maximum(psd, 1e-20)), atol=1e-6
     )
-    assert j["nperseg"] == sesion.cfg["features"]["welch_nperseg"]
+    assert j["nperseg"] == n
+    assert j["nperseg_solicitado"] == solicitado
+    assert j["delta_f"] == round(sesion.fs / n, 4)
 
 
 # --------------------------------------------------------------------------

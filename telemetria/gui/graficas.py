@@ -474,6 +474,7 @@ class CursorGrafico:
         self._grafico = grafico
         self._x: list[float] = []
         self._series: dict[str, list] = {}
+        self._x_por_serie: dict[str, list[float]] = {}
         self._unidades: dict[str, str] = {}
         self._detalles: dict[str, list[str]] = {}
         self._formato_x = None
@@ -492,11 +493,36 @@ class CursorGrafico:
         unidades: dict[str, str] | None = None,
         detalles: dict[str, list[str]] | None = None,
         formato_x=None,
+        x_por_serie: dict[str, list[float]] | None = None,
     ) -> None:
-        """Conecta el cursor a unas arrays nuevas y lo oculta."""
-        longitud = min([len(x)] + [len(v) for v in series.values()]) if series else len(x)
-        self._x = [float(v) if v is not None else 0.0 for v in x[:longitud]]
-        self._series = {nombre: list(v[:longitud]) for nombre, v in series.items()}
+        """Conecta el cursor a unas arrays nuevas y lo oculta.
+
+        ``x_por_serie`` permite leer cada curva en su propia abscisa. Es
+        necesario, por ejemplo, cuando la PSD cruda y la filtrada usan ventanas
+        de Welch distintas y por tanto tienen pasos de frecuencia diferentes.
+        """
+        self._x_por_serie = {}
+        if x_por_serie:
+            self._x = [float(v) if v is not None else 0.0 for v in x]
+            self._series = {nombre: list(valores) for nombre, valores in series.items()}
+            for nombre, valores in self._series.items():
+                abscisas = x_por_serie.get(nombre)
+                if abscisas is None:
+                    continue
+                n = min(len(abscisas), len(valores))
+                self._x_por_serie[nombre] = [
+                    float(v) if v is not None else 0.0 for v in abscisas[:n]
+                ]
+        else:
+            longitud = (
+                min([len(x)] + [len(v) for v in series.values()])
+                if series
+                else len(x)
+            )
+            self._x = [float(v) if v is not None else 0.0 for v in x[:longitud]]
+            self._series = {
+                nombre: list(v[:longitud]) for nombre, v in series.items()
+            }
         self._unidades = dict(unidades or {})
         self._detalles = dict(detalles or {})
         self._formato_x = formato_x
@@ -542,6 +568,16 @@ class CursorGrafico:
             if item is not None:
                 item.hide()
 
+    @staticmethod
+    def _indice_cercano(valores: list[float], objetivo: float) -> int | None:
+        if not valores:
+            return None
+        idx = bisect_left(valores, objetivo)
+        candidatos = [i for i in (idx - 1, idx) if 0 <= i < len(valores)]
+        if not candidatos:
+            return None
+        return min(candidatos, key=lambda i: abs(valores[i] - objetivo))
+
     def mover(self, pos) -> None:
         """Muestra el crosshair si el ratón está dentro del área de la gráfica."""
         if not self._x or not self._series:
@@ -556,11 +592,9 @@ class CursorGrafico:
             self.ocultar()
             return
 
-        idx = bisect_left(self._x, vista.x())
-        candidatos = [i for i in (idx - 1, idx) if 0 <= i < len(self._x)]
-        if not candidatos:
+        mejor = self._indice_cercano(self._x, vista.x())
+        if mejor is None:
             return
-        mejor = min(candidatos, key=lambda i: abs(self._x[i] - vista.x()))
 
         nombre_principal = next(iter(self._series))
         valor_y = self._series[nombre_principal][mejor]
@@ -586,13 +620,21 @@ class CursorGrafico:
         cabecera += f" · y = {self._fmt(y_linea)}"
         lineas = [cabecera]
         for nombre, valores in self._series.items():
-            texto = f"{nombre}: {self._fmt(valores[mejor])}"
+            abscisas = self._x_por_serie.get(nombre)
+            indice = (
+                self._indice_cercano(abscisas, vista.x()) if abscisas else mejor
+            )
+            if indice is None or indice >= len(valores):
+                continue
+            texto = f"{nombre}: {self._fmt(valores[indice])}"
             unidad = self._unidades.get(nombre)
             if unidad:
                 texto += f" {unidad}"
+            if abscisas and abs(abscisas[indice] - self._x[mejor]) > 1e-6:
+                texto += f" @ {self._fmt(abscisas[indice])}"
             extra = self._detalles.get(nombre)
-            if extra and mejor < len(extra) and extra[mejor]:
-                texto += f" · {extra[mejor]}"
+            if extra and indice < len(extra) and extra[indice]:
+                texto += f" · {extra[indice]}"
             lineas.append(texto)
         self._texto.setText("\n".join(lineas))
         self._texto.show()

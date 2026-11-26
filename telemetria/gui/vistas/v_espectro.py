@@ -59,7 +59,9 @@ class VistaEspectro(VistaBase):
             "Muestra en qué frecuencias se mueve el deslizamiento de cada "
             "neumático. La curva verde es la señal ya filtrada; la roja es la "
             "original. La vuelta <b>0</b> usa toda la sesión. Las franjas "
-            "sombreadas son las bandas baja, media y alta."
+            "sombreadas son las bandas baja, media y alta. La resolución (Δf) "
+            "se calcula con la ventana realmente usada, que puede ser menor "
+            "que la solicitada."
         )
 
         grp_controles = QGroupBox("Espectro de Welch (PSD)")
@@ -230,17 +232,24 @@ class VistaEspectro(VistaBase):
         freqs = list(datos.get("freqs", []))
         limpia = list(datos.get("psd_limpio_db", []))
         cruda = list(datos.get("psd_crudo_db") or [])
+        freqs_crudas = list(datos.get("freqs_crudo") or [])
+        if len(freqs_crudas) != len(cruda):
+            freqs_crudas = []
 
         self.curva_limpia.setData(freqs, limpia)
-        self.curva_cruda.setData(freqs, cruda)
+        self.curva_cruda.setData(freqs_crudas or freqs, cruda)
         series = {"Filtrada": limpia}
+        x_por_serie: dict[str, list[float]] = {}
         if cruda:
             series["Original"] = cruda
+            if freqs_crudas:
+                x_por_serie["Original"] = freqs_crudas
         self._cursor.establecer_datos(
             freqs,
             series,
             unidades={nombre: "dB/Hz" for nombre in series},
             formato_x=lambda x, _i: f"{x:.2f} Hz",
+            x_por_serie=x_por_serie,
         )
 
         # El suelo de -200 dB del backend es solo protección numérica: se
@@ -264,12 +273,23 @@ class VistaEspectro(VistaBase):
         lap = datos.get("lap")
         lap_txt = "toda la sesión" if lap is None else f"vuelta {lap}"
         self.grafico.setTitle(f"Espectro · {canal} · {lap_txt}")
-        self.lbl_info_psd.setText(
-            f"Δf = {datos.get('delta_f', '?')} Hz · fs = {datos.get('fs', '?')} Hz · "
-            "ventana = "
-            f"{datos.get('nperseg', '?')} muestras. Escala vertical: 80 dB de "
-            "rango dinámico; los valores originales se leen en el cursor."
+        partes = [
+            f"Δf = {datos.get('delta_f', '?')} Hz · fs = {datos.get('fs', '?')} Hz",
+            f"ventana efectiva = {datos.get('nperseg', '?')} muestras "
+            f"(solicitada: {datos.get('nperseg_solicitado', '?')})",
+        ]
+        if datos.get("nperseg_crudo") is not None:
+            partes.append(
+                f"original: {datos['nperseg_crudo']} muestras · "
+                f"Δf = {datos.get('delta_f_crudo', '?')} Hz"
+            )
+        elif cruda or datos.get("freqs_crudo"):
+            partes.append("original: sin muestras suficientes para Welch")
+        partes.append(
+            "Escala vertical: 80 dB de rango dinámico; los valores originales "
+            "se leen en el cursor."
         )
+        self.lbl_info_psd.setText(" · ".join(partes))
 
     def _dibujar_bandas(self, bandas: dict) -> None:
         """Pinta las bandas baja/media/alta con su nombre sobre la franja."""

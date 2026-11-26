@@ -15,6 +15,8 @@ pensado para Assetto Corsa (AC).
 
 El diseño está en [`docs/plan_etapa1.md`](docs/plan_etapa1.md),
 [`docs/plan_etapa2.md`](docs/plan_etapa2.md) y [`docs/plan_etapa3.md`](docs/plan_etapa3.md).
+El detalle de la Fase 1 de claridad externa está en
+[`docs/MEJORAS_Y_HOJA_DE_RUTA.md`](docs/MEJORAS_Y_HOJA_DE_RUTA.md).
 
 ## Hoja de ruta
 
@@ -23,6 +25,13 @@ El diseño está en [`docs/plan_etapa1.md`](docs/plan_etapa1.md),
 | **1 · Pipeline offline** | Limpieza, features, Ridge y Kalman sobre CSV (fuente simulada F1). | Implementada |
 | **2 · Interfaz** | Backend REST + WebSocket que envuelve el pipeline; GUI PySide6 (7 pestañas) | **Implementada** |
 | **3 · Tiempo real** | Captura desde AC (memoria compartida) y predicción en ventana deslizante; app local con ventana nativa PySide6. | **Implementada** |
+
+La rama `feature/ui-claridad-externa` añade la **Fase 1 de claridad externa**:
+ablación individual y combinada de sensores, resolución real de Welch,
+coherencia de Predicción, tooltips de parámetros y semántica de Alpha. No cambia
+los algoritmos científicos ni rompe los contratos existentes. El detalle y el
+trabajo posterior están en
+[`docs/MEJORAS_Y_HOJA_DE_RUTA.md`](docs/MEJORAS_Y_HOJA_DE_RUTA.md).
 
 La Etapa 1 ya está preparada para la 3: las features se calculan **por ventana**,
 el filtro es **causal** (guarda su estado) y los parámetros de escalado quedan en
@@ -61,7 +70,9 @@ PROYECTO/
 ├── docs/
 │   ├── plan_etapa1.md
 │   ├── plan_etapa2.md
-│   └── plan_etapa3.md
+│   ├── plan_etapa3.md
+│   ├── revision_telemetry_analytics.md
+│   └── MEJORAS_Y_HOJA_DE_RUTA.md
 ├── telemetria/               # paquete único: TODO el código Python
 │   ├── cli.py                # punto de entrada: `python -m telemetria`
 │   ├── pipeline/             # Etapa 1: ciencia offline
@@ -153,11 +164,11 @@ python -m uvicorn telemetria.api.app:app --host 127.0.0.1 --port 8000
 | `POST /api/sesiones/subir` | Carga un CSV subido (drag & drop, multipart `archivo`). |
 | `GET /api/telemetria/canales` | Canales disponibles y físicos. |
 | `GET /api/telemetria/vuelta/{lap}` | Arrays planos `t` + canales de una vuelta (`canales`, `crudo`, `max_puntos`). |
-| `GET /api/telemetria/espectro` | PSD de Welch (crudo vs. limpio) en dB/Hz (`canal`, `lap`, `nperseg`). |
+| `GET /api/telemetria/espectro` | PSD de Welch (crudo vs. limpio) en dB/Hz (`canal`, `lap`, `nperseg`). `nperseg` es la ventana efectiva; `nperseg_solicitado` y `freqs_crudo` explican la resolución real. |
 | `POST /api/modelos/kalman/estimar` | Filtro de Kalman (`q_nivel`, `q_pendiente`, `r`, `monotono`) + bandas. |
 | `POST /api/modelos/ridge/ajustar` | Fija `alpha` (o usa CV) y `excluir`; re-entrena y devuelve métricas e importancias. |
 | `POST /api/modelos/robustez` | MAE de Ridge frente a ruido inyectado (`snr_db`). |
-| `POST /api/modelos/sensores` | Simulador de fallo de sensores: MAE de Ridge al desconectar canales (`caidos`). |
+| `POST /api/modelos/sensores` | Simulador de fallo de sensores: MAE de Ridge al desconectar canales (`caidos`). `modo="individual"` re-entrena por sensor; `modo="combinado"` es el valor por defecto y conserva el contrato anterior. |
 | `GET /api/modelos/features` | Lista de features numéricas del modelo. |
 | `GET /api/config` | Configuración activa en JSON. |
 | `POST /api/config` | Aplica overrides anidados sobre `config.yaml`. |
@@ -307,7 +318,7 @@ vivo. En la pestaña **En vivo**, al iniciar una captura se abre automáticament
 python -m pytest -q
 ```
 
-**183 tests** de Python en verde (incluidos 35 de humo de la GUI en modo `offscreen`).
+**199 tests** de Python en verde (incluidos 43 de humo de la GUI en modo `offscreen`).
 Cobertura por área:
 
 | Fichero | Qué cubre |
@@ -317,14 +328,15 @@ Cobertura por área:
 | `tests/test_api_ws.py` | WebSocket: control, tramas binarias. |
 | `tests/test_coherencia_api.py` | La API reproduce **exactamente** el pipeline de `telemetria.pipeline` (Ridge por CV y Kalman con los Q/R de `config.yaml`), el PSD de Welch y los MAE de referencia de `sim_42.csv`. |
 | `tests/test_rendimiento.py` | Latencia y tramas contra un servidor **`uvicorn` real** (el `TestClient` no mide red). |
-| `tests/test_api_modelos_extra.py` | Extras §3.5: lista de features y simulador de fallo de sensores. |
+| `tests/test_api_modelos_extra.py` | Extras §3.5: lista de features y ablación individual/combinada de sensores. |
+| `tests/test_analisis_espectro.py` | Fase 1: ventana efectiva de Welch, resolución por serie y señales insuficientes. |
 | `tests/test_ac_info.py` | Offsets/tamaños de los structs de AC y el camino «AC no está publicando». |
 | `tests/test_acondicionador.py` | Decimación a la frecuencia objetivo, atenuación del filtro y outliers causales. |
 | `tests/test_fuentes.py` | `BusTiempoReal` y `FuenteCSV` (decimación, esquema y verdad inyectada). |
 | `tests/test_motor_vivo.py` | Degradación agregada desde grip o columna inyectada, predicción Kalman agregada y logger CSV. |
 | `tests/test_vivo_api.py` | Endpoints `/api/vivo/*` y el WebSocket `/api/vivo/stream` (incluye detener bajo carga). |
 | `tests/test_coherencia_live_batch.py` | **D14**: la ruta en vivo (outliers causales + filtro + decimación) reproduce la señal del pipeline batch con correlación > 0.97. Incluye el reprocesado del **CSV crudo** del logger en batch (logger → batch, A1/C/D4). |
-| `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay (orden estable, normalización, progreso %, diferencia A − B, cursor, encuadre, minimapa limitado, rango visible, unidades de ejes, presupuesto adaptativo, zoom sin petición y caché); también cubre los modos archivo/vivo, el Taller de modelos, el cursor en Espectro/Predicción, la «Guía rápida», las tarjetas de calidad, las cabeceras claras de métricas y las etiquetas de bandas. |
+| `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay (orden estable, normalización, progreso %, diferencia A − B, cursor, encuadre, minimapa limitado, rango visible, unidades de ejes, presupuesto adaptativo, zoom sin petición y caché); también cubre los modos archivo/vivo, el Taller de modelos, la Guía rápida, las tarjetas de calidad y, en Fase 1, la ablación separada, la resolución efectiva del espectro, el cursor por serie, las particiones de Predicción, la banda de Kalman, R²/cobertura/error de caída, las importancias y la semántica de α. |
 | `tests/test_reduccion.py` | LTTB multicanal: conserva extremos y picos de cualquier señal, comparte índices entre series y respeta el presupuesto de puntos. |
 
 Latencia medida contra `uvicorn` real (caché caliente): REST ≈ 13 ms, Kalman por WS ≈ 3 ms,

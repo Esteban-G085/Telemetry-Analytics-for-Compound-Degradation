@@ -42,6 +42,9 @@ def _referencia(sesion: Sesion) -> dict:
         "verdad": [float(v) for v in verdad.to_numpy()],
         "proxy_laps": [int(l) for l in proxy.index],
         "proxy": [float(v) for v in proxy.to_numpy()],
+        "referencia_usada": (
+            "verdad_simulada" if getattr(sesion, "verdad", None) is not None else "proxy"
+        ),
     }
 
 
@@ -76,6 +79,7 @@ def ridge_por_vuelta(
     serie = pd.DataFrame({"lap": laps, "pred": pred}).groupby("lap")["pred"].mean()
     verdad = sesion.degradacion_vuelta()
 
+    pred_train = np.array([serie.get(int(l), np.nan) for l in tr], dtype=float)
     te = [int(l) for l in te]
     pred_te = np.array([serie.get(l, np.nan) for l in te], dtype=float)
     true_te = np.array([verdad.get(l, np.nan) for l in te], dtype=float)
@@ -88,8 +92,12 @@ def ridge_por_vuelta(
         "excluir": list(excluir),
         "laps_all": [int(l) for l in serie.index],
         "pred_all": [float(v) for v in serie.to_numpy()],
+        "laps_train": [int(l) for l in tr],
+        "pred_train": [float(v) for v in pred_train],
         "laps_test": te,
         "pred_test": [float(v) for v in pred_te],
+        "n_laps_train": int(len(tr)),
+        "n_laps_test": int(len(te)),
         "true_test": [float(v) for v in true_te],
         "metricas": {k: float(v) for k, v in met.items()},
         "error_caida": evaluacion.error_vuelta_caida(true_te, pred_te, umbral),
@@ -129,6 +137,8 @@ def kalman_por_vuelta(
     return {
         "laps_train": [int(l) for l in tr],
         "laps_test": [int(l) for l in te],
+        "n_laps_train": int(len(tr)),
+        "n_laps_test": int(len(te)),
         "nivel": [float(v) for v in res["nivel"]],
         "pendiente": [float(v) for v in res["pendiente"]],
         "pred": [float(v) for v in medias],
@@ -179,28 +189,43 @@ def espectro(
             return None
         noverlap = n // 2
         f, p = welch(x, fs=fs, nperseg=n, noverlap=noverlap)
-        return f, p
+        return {
+            "n_efectivo": n,
+            "n_muestras": int(len(x)),
+            "freqs": [float(v) for v in f],
+            "psd": p,
+        }
 
     res_limpio = _psd(limpio)
     res_crudo = _psd(crudo)
     if res_limpio is None:
         raise ValueError("Muestras insuficientes para estimar la PSD")
 
-    freqs = [float(v) for v in res_limpio[0]]
-
     def _db(p):
         return [float(10.0 * np.log10(max(v, 1e-20))) for v in p]
 
     bandas = sesion.cfg["features"]["bandas_hz"]
+    n_limpio = res_limpio["n_efectivo"]
     return {
         "canal": canal,
         "lap": lap,
         "fs": fs,
-        "nperseg": nperseg,
-        "delta_f": round(fs / nperseg, 4),
-        "freqs": freqs,
-        "psd_limpio_db": _db(res_limpio[1]),
-        "psd_crudo_db": _db(res_crudo[1]) if res_crudo is not None else None,
+        # ``nperseg`` es el tamaño REAL usado por Welch. El valor pedido por la
+        # GUI/config se conserva aparte para no confundir resolución deseada y
+        # resolución obtenida.
+        "nperseg": n_limpio,
+        "nperseg_solicitado": int(nperseg),
+        "n_muestras_limpio": res_limpio["n_muestras"],
+        "delta_f": round(fs / n_limpio, 4),
+        "freqs": res_limpio["freqs"],
+        "psd_limpio_db": _db(res_limpio["psd"]),
+        "nperseg_crudo": res_crudo["n_efectivo"] if res_crudo is not None else None,
+        "n_muestras_crudo": res_crudo["n_muestras"] if res_crudo is not None else None,
+        "delta_f_crudo": (
+            round(fs / res_crudo["n_efectivo"], 4) if res_crudo is not None else None
+        ),
+        "freqs_crudo": res_crudo["freqs"] if res_crudo is not None else None,
+        "psd_crudo_db": _db(res_crudo["psd"]) if res_crudo is not None else None,
         "bandas": bandas,
         "corte_hz": float(sesion.cfg["limpieza"]["filtro"]["corte_hz"]),
     }
@@ -285,14 +310,29 @@ def _mae_kalman(sesion: Sesion, pred_te: np.ndarray, true_te: np.ndarray) -> flo
     return float(np.mean(np.abs(true_te[finito] - res["nivel"])))
 
 
-def sensores(sesion: Sesion, caidos: list[dict] | None = None, prop_test: float | None = None) -> dict:
+def sensores(
+    sesion: Sesion,
+    caidos: list[dict] | None = None,
+    prop_test: float | None = None,
+    modo: str = "combinado",
+) -> dict:
     """MAE de Ridge al desconectar canales (Vista 5, §3.5).
 
-    ``caidos`` es una lista de ``{"canal": ..., "rueda": ...}``. Se quitan del
-    modelo todas las features derivadas de esos canales y se compara el MAE de
-    test con el baseline (sin fallos). Tambien se reporta el MAE del suavizado
-    de Kalman sobre la serie de Ridge, para ver como compensa el ruido.
+    Existen dos experimentos distintos:
+
+    * ``modo="combinado"`` desconecta todos los sensores solicitados a la vez.
+      Es el contrato historico de la API y mantiene las claves planas.
+    * ``modo="individual"`` desconecta un sensor cada vez. Cada fila se
+      re-entrena por separado contra el **mismo** baseline temporal; nunca se
+      reparte el MAE de una evaluacion conjunta entre los sensores.
+
+    ``caidos`` es una lista de ``{"canal": ..., "rueda": ...}``. Tambien se
+    reporta el MAE del suavizado de Kalman sobre la serie de Ridge, para ver
+    como compensa el ruido.
     """
+    if modo not in ("combinado", "individual"):
+        raise ValueError(f"Modo de ablacion desconocido: {modo}")
+
     feats = sesion.feats
     if feats.empty:
         raise ValueError("La sesion no genero ventanas validas")
@@ -301,32 +341,80 @@ def sensores(sesion: Sesion, caidos: list[dict] | None = None, prop_test: float 
     laps = feats["lap"].to_numpy()
     verdad = sesion.degradacion_vuelta()
     tr, te = modelo.split_temporal(np.unique(laps), _prop_test(sesion, prop_test))
+    if len(tr) < 2 or len(te) < 1:
+        raise ValueError("La sesion no tiene suficientes vueltas para comparar el fallo")
 
     met_base, pred_base = _ajustar_y_evaluar(sesion, X_all, laps, tr, te, verdad)
-
-    quitadas: set[str] = set()
-    for s in caidos or []:
-        quitadas.update(columnas_de_sensor(cols, s.get("canal", ""), s.get("rueda")))
-    keep = [i for i, c in enumerate(cols) if c not in quitadas]
-    if not keep:
-        raise ValueError("El fallo simulado quita todas las features del modelo")
-
-    met, pred = _ajustar_y_evaluar(sesion, X_all[:, keep], laps, tr, te, verdad)
-
     mae_base = float(met_base["mae"])
-    mae = float(met["mae"])
-    return {
-        "caidos": list(caidos or []),
-        "columnas_quitadas": sorted(quitadas),
-        "n_features_base": len(cols),
-        "n_features": len(keep),
+    true_te = np.array([verdad.get(int(l), np.nan) for l in te], dtype=float)
+    mae_kalman_base = _mae_kalman(sesion, pred_base, true_te)
+    laps_test = [int(l) for l in te]
+    solicitados = list(caidos or [])
+
+    def _evaluar(entradas: list[dict]) -> dict:
+        quitadas: set[str] = set()
+        for s in entradas:
+            quitadas.update(columnas_de_sensor(cols, s.get("canal", ""), s.get("rueda")))
+        keep = [i for i, c in enumerate(cols) if c not in quitadas]
+        resultado = {
+            "caidos": [dict(s) for s in entradas],
+            "columnas_quitadas": sorted(quitadas),
+            "n_features_base": len(cols),
+            "n_features": len(keep),
+            "mae_base": mae_base,
+            "metricas_base": {k: float(v) for k, v in met_base.items()},
+            "mae_kalman_base": mae_kalman_base,
+            "laps_test": list(laps_test),
+            "error": None,
+        }
+        if not keep:
+            resultado["error"] = (
+                "El fallo simulado quita todas las features del modelo; "
+                "no se puede ajustar Ridge sin entradas."
+            )
+            return resultado
+        try:
+            met, pred = _ajustar_y_evaluar(sesion, X_all[:, keep], laps, tr, te, verdad)
+        except ValueError as exc:
+            resultado["error"] = f"No hay suficientes muestras para repetir el experimento: {exc}"
+            return resultado
+        mae = float(met["mae"])
+        resultado.update(
+            {
+                "mae": mae,
+                "delta": mae - mae_base,
+                "delta_rel": (mae / mae_base - 1.0) if mae_base > 0 else None,
+                "mae_kalman": _mae_kalman(sesion, pred, true_te),
+                "metricas": {k: float(v) for k, v in met.items()},
+            }
+        )
+        return resultado
+
+    if modo == "individual":
+        resultados = [_evaluar([s]) for s in solicitados]
+    else:
+        combinado = _evaluar(solicitados)
+        if combinado["error"]:
+            raise ValueError(combinado["error"])
+        resultados = [combinado]
+
+    respuesta = {
+        "modo": modo,
+        "caidos": solicitados,
+        "baseline": {
+            "mae": mae_base,
+            "metricas": {k: float(v) for k, v in met_base.items()},
+            "mae_kalman": mae_kalman_base,
+            "n_features": len(cols),
+            "laps_test": list(laps_test),
+        },
+        "resultados": resultados,
         "mae_base": mae_base,
-        "mae": mae,
-        "delta": mae - mae_base,
-        "delta_rel": (mae / mae_base - 1.0) if mae_base > 0 else None,
-        "mae_kalman_base": _mae_kalman(sesion, pred_base, np.array([verdad.get(int(l), np.nan) for l in te], dtype=float)),
-        "mae_kalman": _mae_kalman(sesion, pred, np.array([verdad.get(int(l), np.nan) for l in te], dtype=float)),
-        "metricas": {k: float(v) for k, v in met.items()},
-        "metricas_base": {k: float(v) for k, v in met_base.items()},
-        "laps_test": [int(l) for l in te],
+        "n_features_base": len(cols),
+        "laps_test": list(laps_test),
     }
+    if modo == "combinado":
+        # Contrato historico: la GUI anterior y otros clientes leen estas
+        # claves planas. Solo se rellenan para la evaluacion conjunta.
+        respuesta.update({k: v for k, v in resultados[0].items() if k != "caidos"})
+    return respuesta

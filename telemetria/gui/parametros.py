@@ -21,7 +21,7 @@ ETIQUETAS_PARAMETROS: dict[str, tuple[str, str]] = {
     "q_nivel": ("Kalman · nivel (Q)", "kalman_q"),
     "q_pendiente": ("Kalman · pendiente (Q)", "kalman_q"),
     "r": ("Kalman · ruido (R)", "kalman_r"),
-    "monotono": ("Kalman monótono", "verdad"),
+    "monotono": ("Kalman monótono", "kalman_monotono"),
     "alpha": ("Ridge · alpha", "alpha"),
 }
 
@@ -52,6 +52,43 @@ _PREFIXES = {
 }
 
 
+def estado_alpha(config: dict) -> dict:
+    """Distingue candidatos de CV, alpha aplicado y alpha guardado.
+
+    ``ridge_alphas`` es una lista de candidatos. Solo cuando contiene un único
+    valor puede afirmarse que ese alpha quedó fijado en la configuración; con
+    varios valores el backend usa validación cruzada y el primero de la lista
+    no representa el alpha final del experimento. Alpha nunca se escribe en
+    ``config.yaml`` desde la GUI.
+    """
+    resultado = {
+        "candidatos": [],
+        "guardado": None,
+        "usa_cv": False,
+        "texto": "no disponible",
+    }
+    if not isinstance(config, dict):
+        return resultado
+    modelo = config.get("modelo") or {}
+    alphas = modelo.get("ridge_alphas") if isinstance(modelo, dict) else None
+    if not isinstance(alphas, (list, tuple)):
+        return resultado
+    candidatos: list[float] = []
+    for valor in alphas:
+        try:
+            candidatos.append(float(valor))
+        except (TypeError, ValueError):
+            continue
+    resultado["candidatos"] = candidatos
+    if len(candidatos) == 1:
+        resultado["guardado"] = candidatos[0]
+        resultado["texto"] = f"{candidatos[0]:g}"
+    elif candidatos:
+        resultado["usa_cv"] = True
+        resultado["texto"] = f"validación cruzada ({len(candidatos)} candidatos)"
+    return resultado
+
+
 def parametros_desde_config(config: dict) -> dict[str, float | bool]:
     """Lee los valores guardados sin inventar claves nuevas en el backend."""
     valores = dict(PARAMETROS_POR_DEFECTO)
@@ -63,12 +100,9 @@ def parametros_desde_config(config: dict) -> dict[str, float | bool]:
         for clave in ("q_nivel", "q_pendiente", "r", "monotono"):
             if clave in kalman:
                 valores[clave] = kalman[clave]
-    alphas = modelo.get("ridge_alphas") or []
-    if isinstance(alphas, (list, tuple)) and alphas:
-        try:
-            valores["alpha"] = float(alphas[0])
-        except (TypeError, ValueError):
-            pass
+    alpha_guardado = estado_alpha(config)["guardado"]
+    if alpha_guardado is not None:
+        valores["alpha"] = alpha_guardado
     return valores
 
 

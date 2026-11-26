@@ -16,6 +16,21 @@ GLOSARIO: dict[str, str] = {
         "RMSE: error cuadrático medio. Parecido al MAE, pero penaliza más los "
         "fallos grandes. Menor es mejor."
     ),
+    "r2": (
+        "R²: proporción de la variabilidad explicada por el modelo. 1 es "
+        "perfecto, 0 similar a predecir siempre la media y un valor negativo "
+        "peor que esa media. Solo se calcula con más de una vuelta de prueba."
+    ),
+    "cobertura": (
+        "Cobertura de bandas: porcentaje de vueltas de prueba cuyo valor real "
+        "cae dentro del intervalo de Kalman. Con pocas vueltas solo puede "
+        "tomar unos pocos valores."
+    ),
+    "error_caida": (
+        "Error en la vuelta de caída: diferencia entre el valor observado y el "
+        "estimado en la primera vuelta que supera el umbral de caída. Muestra "
+        "si el modelo anticipa o retrasa ese cambio."
+    ),
     "snr": (
         "SNR: relación señal/ruido en decibelios. Menos dB significa más ruido "
         "añadido a la señal."
@@ -37,8 +52,11 @@ GLOSARIO: dict[str, str] = {
         "(15–40 Hz)."
     ),
     "alpha": (
-        "Alpha de Ridge: parámetro que controla la regularización. Más valor "
-        "da una tendencia más simple."
+        "Alpha aplicado a Ridge en el experimento actual: controla la "
+        "regularización. Más valor da una tendencia más simple. La lista de "
+        "config.yaml son candidatos para validación cruzada; el primero de esa "
+        "lista no es necesariamente el alpha usado. Alpha no se guarda en "
+        "config.yaml: solo afecta al recálculo actual."
     ),
     "kalman_q": (
         "Q de Kalman: cuánto puede cambiar el nivel o la pendiente entre "
@@ -47,6 +65,16 @@ GLOSARIO: dict[str, str] = {
     "kalman_r": (
         "R de Kalman: ruido esperado en la medición. Más valor da una curva "
         "más suave, que responde más tarde."
+    ),
+    "kalman_monotono": (
+        "Kalman monótono: impone que el nivel estimado no baje y que la "
+        "pendiente no sea negativa. Es coherente con un desgaste que solo "
+        "crece, pero inadecuado si la señal debe poder recuperarse o caer."
+    ),
+    "restablecer_fabrica": (
+        "Restablecer valores de fábrica: descarta los overrides guardados y "
+        "vuelve a los valores originales de config.yaml, tanto en la "
+        "configuración como en los controles. No afecta a la sesión de datos."
     ),
     "delta": (
         "Subida del error: cuánto empeora el MAE al desconectar un sensor. "
@@ -126,6 +154,9 @@ GLOSARIO: dict[str, str] = {
 TERMINOS: tuple[tuple[str, str], ...] = (
     ("MAE", "mae"),
     ("RMSE", "rmse"),
+    ("R²", "r2"),
+    ("Cobertura de bandas", "cobertura"),
+    ("Error en la caída", "error_caida"),
     ("SNR", "snr"),
     ("Outlier", "outlier"),
     ("PSD y Welch", "psd"),
@@ -133,6 +164,8 @@ TERMINOS: tuple[tuple[str, str], ...] = (
     ("Alpha de Ridge", "alpha"),
     ("Q y R de Kalman", "kalman_q"),
     ("Ruido R", "kalman_r"),
+    ("Kalman monótono", "kalman_monotono"),
+    ("Restablecer valores de fábrica", "restablecer_fabrica"),
     ("Subida del error", "delta"),
     ("Verdad y proxy", "verdad"),
     ("Vuelta", "vuelta"),

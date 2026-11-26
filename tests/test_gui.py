@@ -98,6 +98,7 @@ class ApiFalso(ApiClient):
 
     def sensores(self, **kwargs) -> None:
         self.llamadas.append("sensores")
+        self.kwargs["sensores"] = kwargs
 
     def features(self) -> None:
         self.llamadas.append("features")
@@ -260,6 +261,76 @@ def test_espectro_y_prediccion_usan_el_formato_real_de_la_api(ventana, api) -> N
     assert len(prediccion.curva_ridge.getData()[0]) == 3
     assert prediccion.tabla.item(0, 1).text() == "0.011"
     assert prediccion.tabla.item(1, 1).text() == "0.003"
+
+
+def test_prediccion_separa_particiones_bandas_e_importancias(ventana, api) -> None:
+    prediccion = ventana.pestanas.widget(2)
+    api.kalman_recibido.emit(
+        {
+            "laps_train": [1, 2],
+            "laps_test": [3, 4],
+            "pred": [0.3, 0.4],
+            "banda_inf": [0.2, 0.3],
+            "banda_sup": [0.4, 0.5],
+            "verdad_laps": [3, 4],
+            "verdad": [0.31, 0.41],
+            "proxy_laps": [3, 4],
+            "proxy": [0.3, 0.4],
+            "referencia_usada": "verdad_simulada",
+            "metricas": {"mae": 0.01, "rmse": 0.02, "r2": 0.8},
+            "cobertura": 0.5,
+            "error_caida": 0.0,
+            "n_laps_train": 2,
+            "n_laps_test": 2,
+        }
+    )
+    api.ridge_recibido.emit(
+        {
+            "laps_all": [1, 2, 3, 4],
+            "pred_all": [0.1, 0.2, 0.3, 0.4],
+            "laps_train": [1, 2],
+            "pred_train": [0.1, 0.2],
+            "laps_test": [3, 4],
+            "pred_test": [0.3, 0.4],
+            "metricas": {"mae": 0.02, "rmse": 0.03, "r2": -0.25},
+            "error_caida": 1.0,
+            "n_laps_train": 2,
+            "n_laps_test": 2,
+            "importancias": [
+                {"feature": "slip_mean_fl", "coeficiente": -0.3},
+                {"feature": "temp_max_fl", "coeficiente": 0.8},
+            ],
+            "referencia_usada": "verdad_simulada",
+            "verdad_laps": [3, 4],
+            "verdad": [0.31, 0.41],
+        }
+    )
+
+    assert list(prediccion.curva_ridge_train.getData()[0]) == [1, 2]
+    assert list(prediccion.curva_ridge_test.getData()[0]) == [3, 4]
+    assert prediccion._banda_kalman is not None
+    assert list(prediccion.curva_banda_inf.getData()[0]) == [3, 4]
+    assert prediccion.tabla.item(0, 3).text() == "0.8"
+    assert prediccion.tabla.item(0, 4).text() == "0.5"
+    assert prediccion.tabla.item(0, 5).text() == "0"
+    assert prediccion.tabla.item(1, 3).text() == "-0.25"
+    assert "2 entrenamiento / 2 prueba" in prediccion.lbl_evaluacion.text()
+    assert "simulada" in prediccion.lbl_referencia.text()
+
+    nombres = [
+        prediccion.tabla_importancias.item(i, 0).text()
+        for i in range(prediccion.tabla_importancias.rowCount())
+    ]
+    assert nombres == ["temp_max_fl", "slip_mean_fl"]
+    assert "Temperatura" in prediccion.tabla_importancias.item(0, 0).toolTip()
+    assert prediccion._barras_importancias is not None
+
+    prediccion.combo_orden_importancias.setCurrentIndex(2)
+    nombres = [
+        prediccion.tabla_importancias.item(i, 0).text()
+        for i in range(prediccion.tabla_importancias.rowCount())
+    ]
+    assert nombres == ["slip_mean_fl", "temp_max_fl"]
 
 
 def test_selectores_ocultan_contexto_y_usan_nombres_amables(ventana, api) -> None:
@@ -496,24 +567,70 @@ def test_vivo_llena_archivos_y_layout(ventana, api) -> None:
     assert "AC publicando: no" in vivo.lbl_layout.text()
 
 
-def test_robustez_muestra_mae_de_sensores(ventana, api) -> None:
+def test_robustez_separa_ablacion_individual_y_combinada(ventana, api) -> None:
     robustez = ventana.pestanas.widget(4)
     robustez.combo_sensor.setCurrentText("wheel_slip")
     robustez.combo_rueda.setCurrentText("fl")
     robustez.btn_anadir.click()
-    assert robustez.tabla_sensores.rowCount() == 1
+    assert robustez.tabla_seleccion.rowCount() == 1
 
+    robustez.btn_sensores.click()
+    assert api.kwargs["sensores"]["modo"] == "individual"
     api.sensores_recibidos.emit(
         {
-            "caidos": [{"canal": "wheel_slip", "rueda": "fl"}],
+            "modo": "individual",
             "mae_base": 0.09,
-            "mae": 0.12,
-            "delta": 0.03,
+            "resultados": [
+                {
+                    "caidos": [{"canal": "wheel_slip", "rueda": "fl"}],
+                    "columnas_quitadas": ["slip_mean_fl"],
+                    "mae": 0.12,
+                    "delta": 0.03,
+                    "error": None,
+                },
+                {
+                    "caidos": [{"canal": "temp_core_c", "rueda": "fl"}],
+                    "columnas_quitadas": ["temp_max_fl"],
+                    "mae": 0.10,
+                    "delta": 0.01,
+                    "error": None,
+                },
+            ],
         }
     )
+    assert robustez.tabla_sensores.rowCount() == 2
+    assert robustez.tabla_sensores.item(0, 0).text() == "wheel_slip"
     assert robustez.tabla_sensores.item(0, 2).text() == "0.12"
+    assert robustez.tabla_sensores.item(0, 3).text() == "0.03"
+    assert "slip_mean_fl" in robustez.tabla_sensores.item(0, 4).text()
     assert "Error sin fallos: 0.09" in robustez.lbl_sensores.text()
-    assert "Subida: ↑ 0.03" in robustez.lbl_sensores.text()
+    assert "Subida: ↑ 0.03" in robustez.lbl_resultado_sensores.text()
+    assert robustez._barras_ablacion is not None
+
+    robustez.combo_modo_sensores.setCurrentIndex(1)
+    robustez.btn_sensores.click()
+    assert api.kwargs["sensores"]["modo"] == "combinado"
+    api.sensores_recibidos.emit(
+        {
+            "modo": "combinado",
+            "mae_base": 0.09,
+            "resultados": [
+                {
+                    "caidos": [{"canal": "wheel_slip", "rueda": "fl"}],
+                    "columnas_quitadas": ["slip_mean_fl"],
+                    "mae": 0.15,
+                    "delta": 0.06,
+                    "error": None,
+                }
+            ],
+        }
+    )
+    assert robustez.tabla_combinada.rowCount() == 1
+    assert robustez.tabla_combinada.item(0, 1).text() == "0.15"
+    assert robustez.tabla_sensores.rowCount() == 2
+    assert robustez.tabla_sensores.item(0, 2).text() == "0.12"
+    assert "conjunto" in robustez.lbl_resultado_combinado.text()
+    assert robustez._barras_ablacion is not None
 
 
 def test_guia_rapida_se_abre_y_explica_metricas(ventana) -> None:
@@ -604,6 +721,38 @@ def test_espectro_etiqueta_las_bandas(ventana, api) -> None:
         "Media",
         "Alta",
     ]
+
+
+def test_espectro_muestra_resolucion_efectiva_y_lee_cada_curva(ventana, api) -> None:
+    api.espectro_recibido.emit(
+        {
+            "canal": "wheel_slip_fl",
+            "lap": 1,
+            "fs": 100.0,
+            "nperseg": 40,
+            "nperseg_solicitado": 128,
+            "delta_f": 2.5,
+            "freqs": [0.0, 1.0, 2.0],
+            "psd_limpio_db": [-10.0, -20.0, -30.0],
+            "nperseg_crudo": 128,
+            "delta_f_crudo": 0.7812,
+            "freqs_crudo": [0.1, 0.6, 1.1, 1.6, 2.1],
+            "psd_crudo_db": [-5.0, -15.0, -25.0, -35.0, -45.0],
+            "bandas": {"baja": [0.0, 1.0]},
+        }
+    )
+    espectro = ventana.pestanas.widget(1)
+    texto = espectro.lbl_info_psd.text()
+    assert "ventana efectiva = 40" in texto
+    assert "solicitada: 128" in texto
+    assert "original: 128 muestras" in texto
+    assert "Δf = 2.5 Hz" in texto
+    assert len(espectro.curva_cruda.getData()[0]) == 5
+
+    espectro._cursor.mover(espectro.grafico.plotItem.sceneBoundingRect().center())
+    lectura = espectro._cursor.lectura
+    assert "Filtrada" in lectura and "Original" in lectura
+    assert "@" in lectura
 
 
 def test_replay_pide_puntos_segun_el_ancho_del_grafico(ventana, api) -> None:
@@ -952,6 +1101,41 @@ def test_taller_centraliza_parametros_y_prediccion_solo_resultados(
     ]
     assert any(fila[0] == "Ridge · alpha" and fila[1] == "0.5" for fila in filas)
     assert any(fila[0] == "Kalman · nivel (Q)" and fila[1] == "0.0002" for fila in filas)
+
+
+def test_taller_explica_alpha_y_corrige_tooltips(ventana, api) -> None:
+    from telemetria.gui.parametros import estado_alpha, parametros_desde_config
+
+    taller = ventana.pestanas.widget(3)
+    prediccion = ventana.pestanas.widget(2)
+    assert "nivel" in taller.chk_monotono.toolTip()
+    assert "pendiente" in taller.chk_monotono.toolTip()
+    assert "config.yaml" in taller.btn_reiniciar.toolTip()
+    assert "no se guarda en config.yaml" in prediccion.lbl_parametros.text()
+
+    config = {
+        "modelo": {
+            "kalman": {"q_nivel": 0.0001, "q_pendiente": 0.00001, "r": 0.001},
+            "ridge_alphas": [0.001, 0.01, 1.0],
+        }
+    }
+    estado = estado_alpha(config)
+    assert estado["usa_cv"] is True
+    assert estado["guardado"] is None
+    assert len(estado["candidatos"]) == 3
+    assert parametros_desde_config(config)["alpha"] == 0.1
+
+    api.config_recibida.emit({"config": config})
+    filas = {
+        taller.tabla_config.item(fila, 0).text(): [
+            taller.tabla_config.item(fila, columna).text()
+            for columna in range(taller.tabla_config.columnCount())
+        ]
+        for fila in range(taller.tabla_config.rowCount())
+    }
+    assert filas["Ridge · alpha"][1] == "validación cruzada (3 candidatos)"
+    assert "se aplica" in filas["Ridge · alpha"][3]
+    assert "alpha" in taller.lbl_config.text().lower()
 
 
 def test_cursor_marca_muestra_real_y_caja_no_se_corta(ventana, api) -> None:

@@ -156,19 +156,19 @@ comparador no pisa el gráfico de detalle.
 | `main.py` | Punto de entrada: arranca backend + ventana |
 | `paleta.py` | Paleta clara única aplicada a Qt (QPalette) y pyqtgraph; colores de serie y de banda. |
 | `etiquetas_canales.py` | Traduce las claves de la API a nombres legibles y oculta las columnas de contexto. |
-| `glosario.py` | Definiciones únicas de MAE, RMSE, SNR, outlier, PSD, bandas, α, Q/R, calidad, progreso, diferencia, cursor y modos para tooltips y guía. |
+| `glosario.py` | Definiciones únicas de MAE, RMSE, R², cobertura, error de caída, SNR, outlier, PSD, bandas, α, Q/R/monotonía, restablecimiento, calidad, progreso, diferencia, cursor y modos para tooltips y guía. |
 | `dialogo_ayuda.py` | «Guía rápida»: diálogo no modal con el paso a paso y el glosario. |
 | `cliente_api.py` | Cliente REST (`QNetworkAccessManager`) + WebSocket (`QWebSocket`) nativos de Qt, sin hilos propios; emite señales y cachea las vueltas por sesión/vuelta/canales. |
 | `reduccion.py` | Presupuesto de puntos según el ancho del gráfico y LTTB multicanal local para el zoom. No toca las claves JSON del backend. |
-| `graficas.py` | Ayudas de gráficas: minimapa con rango limitado a los datos y cursor compartido con posición, unidades y valores. |
+| `graficas.py` | Ayudas de gráficas: minimapa con rango limitado a los datos y cursor compartido con posición, unidades y valores. Lee cada serie en su abscisa real cuando las frecuencias difieren. |
 | `parametros.py` | Valores por defecto, etiquetas y explicaciones de features compartidas por el Taller y Predicción; conserva las claves del backend. |
 | `ventana_principal.py` | `QMainWindow`: barra de estado, aviso de modo, botón «Guía rápida», 7 pestañas con gating archivo/vivo y panel WS. |
 | `vistas/vista_base.py` | Clase base de todas las pestañas; provee el bloque de ayuda superior (`agregar_ayuda()`). |
 | `vistas/v_sesiones.py` | Lista de sesiones (CSV), cargar sesión, ver sesión activa. |
 | `vistas/v_espectro.py` | Espectro de Welch (crudo vs. limpio) por canal. |
-| `vistas/v_prediccion.py` | Solo resultados de Ridge y Kalman, métricas y cursor; recibe los parámetros desde el Taller. |
+| `vistas/v_prediccion.py` | Resultados de Ridge y Kalman: entrenamiento frente a prueba, banda de Kalman, procedencia de la referencia, métricas ampliadas, importancias y cursor; recibe los parámetros desde el Taller. |
 | `vistas/v_laboratorio.py` | «Taller de modelos»: todos los parámetros (Q/R/monotonía y alpha), tabla antes/después de la configuración y features con tooltips. |
-| `vistas/v_robustez.py` | MAE vs SNR y simulador de fallo de sensores. |
+| `vistas/v_robustez.py` | MAE vs SNR y simulador de fallo de sensores con evaluación individual y combinada separadas. |
 | `vistas/v_replay.py` | Replay de una vuelta: comparador multi-señal con cursor, progreso %, diferencia A − B, minimapa/rango visible y ejes con unidades; detalle crudo vs. limpio con outliers y KPIs. Ambos usan `max_puntos` adaptativo y LTTB local. |
 | `vistas/v_vivo.py` | Captura en vivo: iniciar/detener, estado, osciloscopio. |
 
@@ -177,12 +177,55 @@ comparador no pisa el gráfico de detalle.
 | # | Pestaña | Qué muestra | Endpoints usados |
 |---|---------|-------------|------------------|
 | 1 | **Sesiones** | CSV disponibles, cargar sesión, sesión activa | `GET/POST /api/sesiones/*` |
-| 2 | **Espectro** | PSD de Welch por canal (crudo/limpio), bandas Baja/Media/Alta etiquetadas | `GET /api/telemetria/espectro` |
-| 3 | **Predicción** | Solo resultados: degradación estimada (Ridge, Kalman), error medio (MAE) y error grande (RMSE) | `POST /api/modelos/kalman/estimar`, `POST /api/modelos/ridge/ajustar` |
-| 4 | **Taller de modelos** | Parámetros centralizados (Q/R/monotonía y α), antes/después de la config y features explicadas | `GET/POST/DELETE /api/config`, `GET /api/modelos/features` |
-| 5 | **Robustez** | Error frente al ruido (SNR), error sin fallos y subida del error ↑ al desconectar sensores | `POST /api/modelos/robustez`, `POST /api/modelos/sensores` |
+| 2 | **Espectro** | PSD de Welch por canal (crudo/limpio), bandas etiquetadas, ventana efectiva frente a solicitada y resolución por curva | `GET /api/telemetria/espectro` |
+| 3 | **Predicción** | Ridge ajuste/prueba, Kalman con banda, referencia simulada o proxy, MAE/RMSE/R²/cobertura/error de caída e importancias | `POST /api/modelos/kalman/estimar`, `POST /api/modelos/ridge/ajustar` |
+| 4 | **Taller de modelos** | Parámetros centralizados (Q/R/monotonía y α), antes/después de la config y features explicadas. Distingue α fijado, candidatos de CV y α aplicado | `GET/POST/DELETE /api/config`, `GET /api/modelos/features` |
+| 5 | **Robustez** | Error frente al ruido (SNR), ablación individual por sensor y resultado combinado en secciones separadas | `POST /api/modelos/robustez`, `POST /api/modelos/sensores` |
 | 6 | **Replay** | Comparador de varias señales (cursor, progreso %, diferencia A − B) + detalle crudo/limpio, outliers y tarjetas de calidad | `GET /api/telemetria/vuelta/{lap}` |
 | 7 | **En vivo** | Captura desde AC o CSV, estado, osciloscopio | `POST/GET /api/vivo/*` |
+
+## Coherencia de resultados (Fase 1)
+
+### Ablación de sensores
+
+La pestaña **Robustez** tiene una tabla de selección y dos experimentos. En
+**Individual**, cada sensor se desconecta por separado y se re-entrena Ridge; la
+tabla se ordena por subida del error y la gráfica muestra esa subida. En
+**Combinado**, todos los sensores seleccionados se desconectan a la vez y el
+resultado aparece solo en la sección B. El MAE combinado nunca se copia a las
+filas individuales. La subida del error indica sensibilidad del modelo a perder
+esa información, no una causa física.
+
+### Espectro
+
+La etiqueta bajo la gráfica distingue la ventana efectiva de Welch de la
+ventana solicitada. Cuando la señal original y la filtrada usan ventanas
+distintas, cada curva se dibuja con sus frecuencias y el cursor indica la
+frecuencia propia de la serie. Si no hay suficientes muestras, la GUI lo dice
+en lugar de mostrar una PSD inventada.
+
+### Predicción
+
+La curva discontinua de Ridge es el ajuste sobre entrenamiento; los puntos
+grandes son la evaluación sobre prueba y son los únicos que alimentan las
+métricas. La franja verde es la banda de incertidumbre de Kalman. La referencia
+se nombra como verdad simulada o proxy, y se recuerda que el proxy es una
+aproximación. R², cobertura y error de caída se muestran con su explicación; un
+valor "No disponible" no significa un buen resultado. La sección de
+importancias ordena los coeficientes de Ridge, distingue signos por color y
+advierte que un coeficiente no demuestra causalidad.
+
+### Alpha y parámetros
+
+En el **Taller de modelos**, la columna «Guardado» de α muestra la lista de
+candidatos de validación cruzada o el único valor fijado en `config.yaml`. La
+columna «En pantalla» es el α que se aplica al recalcular. Alpha no se escribe
+en `config.yaml`. Q, R y monotonía sí se pueden guardar como overrides;
+**Restablecer valores de fábrica** descarta esos overrides y vuelve a los
+valores originales sin tocar la sesión de datos.
+
+El detalle técnico de esta fase está en
+[`docs/MEJORAS_Y_HOJA_DE_RUTA.md`](docs/MEJORAS_Y_HOJA_DE_RUTA.md).
 
 El panel superior permite conectar/desconectar el WebSocket de telemetría en
 tiempo real (`/ws/telemetria`), solo en **modo vivo**; en modo archivo queda
@@ -214,18 +257,22 @@ usaba (`/stint`, dispersión y correlación).
 .venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider
 ```
 
-**183 tests** en total, de los cuales **35** son de humo de la GUI en modo
+**199 tests** en total, de los cuales **43** son de humo de la GUI en modo
 `offscreen`. Comprueban que arranca sin sesión, que se refresca al cargar una,
 que las 7 pestañas tienen ayuda visible, que los selectores usan nombres
 amables y ocultan las columnas de contexto, y que el comparador de Replay
 dibuja varias señales (también normalizadas). También cubren la **Guía rápida**,
 las tarjetas de calidad de Replay, las cabeceras claras de métricas y las
 etiquetas de las bandas del espectro, además del orden estable de colores, el
-eje de progreso, la curva de diferencia, el cursor en las tres gráficas, el
+eje de progreso, la curva de diferencia, el cursor en las gráficas, el
 encuadre, el zoom limitado a los datos, la separación de modos, el Taller de
 modelos, el presupuesto adaptativo, el zoom sin nueva petición, la caché de
-vueltas, el minimapa, el rango visible y las unidades de los ejes. Otros 4 tests
-comprueban la reducción LTTB (picos compartidos y sin desalinear series).
+vueltas, el minimapa, el rango visible y las unidades de los ejes. La Fase 1
+añade cobertura para la ablación individual y combinada, la ventana efectiva de
+Welch, el cursor con frecuencias por serie, las particiones de Ridge, la banda
+de Kalman, R², cobertura, error de caída, importancias, la semántica de α y los
+tooltips corregidos. Otros 4 tests comprueban la reducción LTTB (picos
+compartidos y sin desalinear series).
 
 Medición con el smoke real (`sim_test_99.csv`, vuelta 1): el payload de
 `throttle + brake` baja de **94,0 KB / 5067 puntos** con el valor por defecto

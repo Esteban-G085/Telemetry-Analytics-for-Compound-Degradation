@@ -305,13 +305,22 @@ class ApiClient(QObject):
             cuerpo={} if snr_db is None else {"snr_db": snr_db},
         )
 
-    def sensores(self, caidos: list[dict] | None = None) -> None:
+    def sensores(
+        self,
+        caidos: list[dict] | None = None,
+        modo: str | None = None,
+    ) -> None:
+        cuerpo: dict = {}
+        if caidos is not None:
+            cuerpo["caidos"] = caidos
+        if modo is not None:
+            cuerpo["modo"] = modo
         self._pedir(
             "/api/modelos/sensores",
             self.sensores_recibidos,
             self.error_sensores,
             metodo="POST",
-            cuerpo={} if caidos is None else {"caidos": caidos},
+            cuerpo=cuerpo,
         )
 
     def features(self) -> None:

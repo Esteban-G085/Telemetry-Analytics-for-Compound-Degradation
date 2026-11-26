@@ -35,6 +35,7 @@ from telemetria.gui.parametros import (
     ETIQUETAS_PARAMETROS,
     PARAMETROS_POR_DEFECTO,
     descripcion_feature,
+    estado_alpha,
     parametros_desde_config,
 )
 from telemetria.gui.vistas.vista_base import VistaBase, error_amigable
@@ -48,6 +49,7 @@ class VistaLaboratorio(VistaBase):
     def __init__(self, api: ApiClient, parent=None) -> None:
         super().__init__(api, parent)
         self._config_guardada: dict = {}
+        self._config_cruda: dict = {}
         self._reiniciando = False
         self._construir_ui()
         self._conectar_senales()
@@ -101,9 +103,9 @@ class VistaLaboratorio(VistaBase):
         lay.addWidget(QLabel(f"{alpha_etiqueta}:"), 0, 2)
         lay.addWidget(self.spin_alpha, 0, 3)
 
-        self.chk_monotono = QCheckBox("Kalman monótono")
+        self.chk_monotono = QCheckBox(ETIQUETAS_PARAMETROS["monotono"][0])
         self.chk_monotono.setChecked(True)
-        self.chk_monotono.setToolTip(tooltip("verdad"))
+        self.chk_monotono.setToolTip(tooltip(ETIQUETAS_PARAMETROS["monotono"][1]))
         lay.addWidget(self.chk_monotono, 1, 2, 1, 2)
 
         self.btn_aplicar = QPushButton("Aplicar y recalcular")
@@ -146,7 +148,7 @@ class VistaLaboratorio(VistaBase):
             "Alpha se usa al recalcular; no se escribe en config.yaml."
         )
         self.btn_reiniciar = QPushButton("Restablecer valores de fábrica")
-        self.btn_reiniciar.setToolTip(tooltip("encuadrar"))
+        self.btn_reiniciar.setToolTip(tooltip("restablecer_fabrica"))
         lay_botones.addWidget(self.btn_guardar)
         lay_botones.addWidget(self.btn_reiniciar)
         lay_botones.addStretch()
@@ -224,13 +226,17 @@ class VistaLaboratorio(VistaBase):
 
     def _mostrar_config(self, datos: dict) -> None:
         config = datos.get("config", datos) if isinstance(datos, dict) else {}
+        self._config_cruda = config if isinstance(config, dict) else {}
         self._config_guardada = parametros_desde_config(config)
         if self._reiniciando:
             self._cargar_parametros(self._config_guardada)
             self._reiniciando = False
         self.lbl_config.setText(
-            "Valores guardados en config.yaml a la izquierda; lo que tienes "
-            "en pantalla en la columna 'En pantalla'."
+            "«Guardado» muestra config.yaml (para alpha, la lista de "
+            "candidatos o el único valor fijado). «En pantalla» es lo que se "
+            "aplica al pulsar Aplicar. Q/R/monotonía se pueden guardar como "
+            "overrides; alpha solo afecta al experimento actual y no se "
+            "escribe en config.yaml."
         )
         self._actualizar_tabla_config()
 
@@ -238,18 +244,29 @@ class VistaLaboratorio(VistaBase):
         actuales = self._parametros_actuales()
         guardados = self._config_guardada or PARAMETROS_POR_DEFECTO
         self.tabla_config.setRowCount(0)
+        alpha_estado = estado_alpha(self._config_cruda)
         for clave, (etiqueta, clave_glosario) in ETIQUETAS_PARAMETROS.items():
             fila = self.tabla_config.rowCount()
             self.tabla_config.insertRow(fila)
             antes = guardados.get(clave, PARAMETROS_POR_DEFECTO[clave])
             ahora = actuales[clave]
-            if isinstance(antes, bool) or isinstance(ahora, bool):
+            if clave == "alpha":
+                antes_txt = alpha_estado["texto"]
+                ahora_txt = f"{float(ahora):g}"
+                if alpha_estado["usa_cv"]:
+                    resultado = f"se aplica {ahora_txt} al recalcular"
+                elif alpha_estado["guardado"] is None:
+                    resultado = "no guardado; solo se aplica"
+                else:
+                    resultado = "sin cambios" if antes == ahora else "cambiará"
+            elif isinstance(antes, bool) or isinstance(ahora, bool):
                 antes_txt = "sí" if antes else "no"
                 ahora_txt = "sí" if ahora else "no"
+                resultado = "sin cambios" if antes == ahora else "cambiará"
             else:
                 antes_txt = f"{float(antes):g}"
                 ahora_txt = f"{float(ahora):g}"
-            resultado = "sin cambios" if antes == ahora else "cambiará"
+                resultado = "sin cambios" if antes == ahora else "cambiará"
             celdas = (
                 etiqueta,
                 antes_txt,
