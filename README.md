@@ -470,26 +470,55 @@ Extras del plan §3.2 y §3.5:
 Queda como mejora opcional la **validación visual a 60 FPS con 360k muestras**;
 el pipeline y la API ya están cubiertos por tests de rendimiento y coherencia.
 
-### Aceleradores opcionales de otros lenguajes (propuesta, no aplicados)
+### Aceleradores opcionales de otros lenguajes (medidos, no aplicados)
 
 El proyecto ya usa NumPy/pandas vectorizados, orjson y LTTB en la GUI, así que
-**no hace falta reescribirlo**. Si aparece un cuello de botella medido, la
-propuesta ordenada por coste/beneficio es:
+**no hace falta reescribirlo**. Para decidir con datos se midió el pipeline real
+en Windows/Python 3.11 con pandas 3.1.1, Polars 2.2.0, DuckDB 2.0.1 y
+pyarrow 26.0.1 (mediana de 3 repeticiones; 2 en el núcleo de features), sobre
+`sim_test_99.csv` (37,5 MB) y `sim_42.csv` (334,7 MB). Antes de comparar, el
+núcleo del benchmark se verificó contra `features_por_ventanas`: 49 ventanas y
+diferencia máxima `0` en seis features, incluida la potencia por bandas.
 
-1. **Polars** para la limpieza/features por ventana y las agregaciones por
-   vuelta (sustituye pandas solo en el punto caliente; mismo DataFrame de
-   entrada/salida). Es el cambio con menor fricción y suele acelerar grupos y
-   ventanas grandes.
-2. **DuckDB** para consultas sobre los CSV crudos (`data/raw/`) y el filtrado
-   por vuelta/canal antes de cargar todo en memoria. Útil si el problema es
-   leer `sim_42.csv` (~334 MB), no calcular.
-3. **Rust/Go/Cython** solo como última opción, y únicamente para una función
-   concreta que el perfilado marque como dominante (por ejemplo LTTB o el
-   detector causal de outliers), detrás de la misma firma Python.
+Resultados en el archivo grande (`sim_42.csv`, 702.495 filas):
 
-Antes de adoptar cualquiera: medir con el smoke real y con
+| Operación | pandas | Polars | DuckDB |
+| --- | ---: | ---: | ---: |
+| Lectura completa del CSV | 0,343 s | 0,184 s | 0,868 s |
+| Lectura + paso a DataFrame de pandas | 0,343 s | 0,209 s | 0,868 s |
+| Proyección de 9 columnas + filtro por `lap` | 0,013 s | 0,006 s | 0,557 s (desde archivo) |
+| Núcleo de features de 1 rueda (W=200, H=100, con Welch) | 3,369 s | 2,384 s | — |
+
+En el archivo pequeño la lectura es 0,051 s (pandas), 0,029 s (Polars) y
+0,446 s (DuckDB). La diferencia máxima entre el núcleo pandas y el de
+Polars+NumPy fue `0` en ambos archivos.
+
+Propuesta ordenada por beneficio medido:
+
+1. **Reorganizar el armado de ventanas con `gather` de Polars + reducciones
+   NumPy**, manteniendo la firma y las claves actuales: 3,369 → 2,384 s (1,4×)
+   en el archivo grande, con resultados idénticos. Sin el cálculo de PSD la
+   ganancia es de 0,971 → 0,113 s (8,6×), lo que confirma que el tiempo real
+   lo domina Welch (~70 % del núcleo pandas), no el DataFrame. Si se toca este
+   punto, el mayor retorno está en vectorizar o agrupar el PSD, no en cambiar
+   de biblioteca.
+2. **Polars solo en la lectura inicial**: 0,343 → 0,184 s (1,9×), o 0,209 s
+   (1,6×) si se convierte de vuelta a pandas para la limpieza. Requiere añadir
+   `polars` y `pyarrow`; tiene sentido solo si la lectura pasa a dominar el
+   tiempo total, que hoy no es el caso.
+3. **DuckDB no se recomienda para el pipeline**: `read_csv_auto` y la
+   conversión a pandas tardan 0,868 s frente a 0,343 s de pandas (2,5× más
+   lento), y la proyección desde archivo 0,557 s frente a 0,356 s de leer y
+   filtrar con pandas. Sirve para consultas puntuales sobre los CSV, no como
+   acelerador de la ruta caliente.
+4. **Rust/Go/Cython** queda descartado sin evidencia propia: el perfilado
+   señala a Welch como función dominante, y cualquier cambio ahí debe medirse
+   primero con la misma réplica verificada.
+
+Antes de adoptar cualquiera: repetir el smoke real y
 `tests/test_rendimiento.py`, comparar latencia y memoria, y mantener los tests
-de coherencia API↔pipeline. Ninguno de estos cambios está aplicado en esta rama.
+de coherencia API↔pipeline. Ninguno de estos cambios está aplicado en esta
+rama; `requirements.txt`, el backend y el pipeline siguen intactos.
 
 ## Limitaciones conocidas
 
