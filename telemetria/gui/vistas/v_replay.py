@@ -40,6 +40,7 @@ from telemetria.gui.paleta import (
     TEXTO_SUAVE,
     color_serie,
 )
+from telemetria.gui.reduccion import presupuesto_puntos, reducir
 from telemetria.gui.vistas.vista_base import VistaBase, error_amigable
 
 PRESETS: dict[str, tuple[str, ...]] = {
@@ -70,6 +71,9 @@ class VistaReplay(VistaBase):
         self._curva_diferencia: object | None = None
         self._linea_cursor: object | None = None
         self._lectura_cursor: object | None = None
+        self._x_dibujado: list[float] = []
+        self._y_dibujado: dict[str, list] = {}
+        self._redibujando = False
         self._construir_ui()
         self._conectar_senales()
         # Vueltas y canales llegan con sesion_activa_recibida.
@@ -199,6 +203,10 @@ class VistaReplay(VistaBase):
         self.grafico_comparar.setMinimumHeight(300)
         lay_c.addWidget(self.grafico_comparar)
 
+        self.lbl_puntos = QLabel("Puntos dibujados: —")
+        self.lbl_puntos.setToolTip(tooltip("downsample"))
+        lay_c.addWidget(self.lbl_puntos)
+
         grp_comparar.setLayout(lay_c)
         layout.addWidget(grp_comparar, stretch=1)
 
@@ -265,6 +273,9 @@ class VistaReplay(VistaBase):
         self.btn_encuadrar.clicked.connect(self._encuadrar_comparacion)
         self.grafico_comparar.scene().sigMouseMoved.connect(
             self._mover_cursor_comparacion
+        )
+        self.grafico_comparar.plotItem.vb.sigRangeChanged.connect(
+            self._al_cambiar_rango_comparacion
         )
 
         self.api.sesion_activa_recibida.connect(self._actualizar_laps)
@@ -363,7 +374,12 @@ class VistaReplay(VistaBase):
             self._limpiar_comparacion()
             self.grafico_comparar.setTitle("Comparador (elige señales)")
             return
-        self.api.vuelta_comparar(lap=int(texto), canales=canales, crudo=False)
+        self.api.vuelta_comparar(
+            lap=int(texto),
+            canales=canales,
+            crudo=False,
+            max_puntos=presupuesto_puntos(self.grafico_comparar.width()),
+        )
 
     def _limpiar_comparacion(self) -> None:
         for curva in list(self._curvas_comparar.values()):
@@ -376,6 +392,10 @@ class VistaReplay(VistaBase):
         self._rangos_comparar.clear()
         self._t_comparar = []
         self._x_comparar_visible = []
+        self._x_dibujado = []
+        self._y_dibujado = {}
+        if hasattr(self, "lbl_puntos"):
+            self.lbl_puntos.setText("Puntos dibujados: —")
         self._actualizar_diferencia()
         self._ocultar_cursor()
 
@@ -425,6 +445,60 @@ class VistaReplay(VistaBase):
             return self._normalizar(valores)
         return [float(v) if v is not None else 0.0 for v in valores]
 
+    def _al_cambiar_rango_comparacion(self, *_args) -> None:
+        """Al hacer zoom se redibuja solo el rango visible, sin otra petición."""
+        if not self._redibujando:
+            self._redibujar_curvas_comparar()
+
+    def _redibujar_curvas_comparar(self) -> None:
+        if (
+            self._redibujando
+            or not self._x_comparar_visible
+            or not self._curvas_comparar
+        ):
+            return
+        self._redibujando = True
+        try:
+            x_min, x_max = self.grafico_comparar.plotItem.vb.viewRange()[0]
+            if not x_max > x_min:
+                x_min, x_max = (
+                    min(self._x_comparar_visible),
+                    max(self._x_comparar_visible),
+                )
+            ini = max(0, bisect_left(self._x_comparar_visible, x_min) - 1)
+            fin = min(
+                len(self._x_comparar_visible),
+                bisect_left(self._x_comparar_visible, x_max) + 1,
+            )
+            if fin - ini < 2:
+                ini, fin = 0, len(self._x_comparar_visible)
+
+            x = self._x_comparar_visible[ini:fin]
+            crudo = {
+                canal: self._series_comparar[canal][ini:fin]
+                for canal in self._curvas_comparar
+            }
+            x_reducido, _, indices = reducir(
+                x,
+                crudo,
+                presupuesto_puntos(self.grafico_comparar.width(), factor=2),
+            )
+            self._x_dibujado = x_reducido
+            for canal, curva in self._curvas_comparar.items():
+                self._y_dibujado[canal] = [
+                    self._y_comparar_visible[canal][ini + i] for i in indices
+                ]
+                curva.setData(self._x_dibujado, self._y_dibujado[canal])
+
+            self.lbl_puntos.setText(
+                f"Puntos dibujados: {len(self._x_dibujado)} · "
+                f"de {len(self._x_comparar_visible)} recibidos (LTTB)"
+            )
+            self._actualizar_diferencia()
+            self._ocultar_cursor()
+        finally:
+            self._redibujando = False
+
     def _actualizar_eje_comparacion(self) -> None:
         self.grafico_comparar.setLabel(
             "bottom",
@@ -433,12 +507,13 @@ class VistaReplay(VistaBase):
         if not self._series_comparar:
             return
         self._x_comparar_visible = self._x_para_comparar(self._t_comparar)
-        for canal, curva in self._curvas_comparar.items():
-            curva.setData(
-                self._x_comparar_visible, self._y_comparar_visible.get(canal, [])
-            )
-        self._actualizar_diferencia()
-        self._ocultar_cursor()
+        # El rango anterior está en la unidad vieja (s vs. %): lo reencuadra.
+        self.grafico_comparar.setXRange(
+            min(self._x_comparar_visible),
+            max(self._x_comparar_visible),
+            padding=0.02,
+        )
+        self._redibujar_curvas_comparar()
 
     def _actualizar_diferencia(self, _marcado=None) -> None:
         if self._curva_diferencia is not None:
@@ -450,10 +525,10 @@ class VistaReplay(VistaBase):
             return
 
         canales = list(self._series_comparar)
-        if len(canales) != 2 or not self._x_comparar_visible:
+        if len(canales) != 2 or not self._x_dibujado:
             return
-        a = self._y_comparar_visible.get(canales[0], [])
-        b = self._y_comparar_visible.get(canales[1], [])
+        a = self._y_dibujado.get(canales[0], [])
+        b = self._y_dibujado.get(canales[1], [])
         if not a or not b:
             return
         diferencia = [
@@ -461,7 +536,7 @@ class VistaReplay(VistaBase):
             for x, y in zip(a, b)
         ]
         self._curva_diferencia = self.grafico_comparar.plot(
-            self._x_comparar_visible,
+            self._x_dibujado,
             diferencia,
             pen=pg.mkPen(TEXTO_SUAVE, width=1, style=Qt.PenStyle.DashLine),
             name="Diferencia A − B",
@@ -563,8 +638,8 @@ class VistaReplay(VistaBase):
                 self._rangos_comparar[canal] = (min(numeros), max(numeros))
             self._y_comparar_visible[canal] = self._y_para_comparar(canal)
             curva = self.grafico_comparar.plot(
-                self._x_comparar_visible,
-                self._y_comparar_visible[canal],
+                [],
+                [],
                 pen=pg.mkPen(color_serie(indice), width=2),
                 name=self._nombre_serie(canal, normalizar),
             )
@@ -580,7 +655,12 @@ class VistaReplay(VistaBase):
         self.grafico_comparar.setTitle(
             f"Vuelta {datos.get('lap', '?')} · {len(canales)} señales"
         )
-        self._actualizar_diferencia()
+        self.grafico_comparar.setXRange(
+            min(self._x_comparar_visible),
+            max(self._x_comparar_visible),
+            padding=0.02,
+        )
+        self._redibujar_curvas_comparar()
 
     def _mostrar_error_comparacion(self, mensaje: str) -> None:
         self.grafico_comparar.setTitle(error_amigable(mensaje))
@@ -597,7 +677,12 @@ class VistaReplay(VistaBase):
         # Nunca mandar texto de error como parametro de la URL (httpx lo
         # rechaza con 'Invalid non-printable ASCII character in URL').
         canales_str = canal if canal in self._canales else None
-        self.api.vuelta(lap=lap, canales=canales_str, crudo=True)
+        self.api.vuelta(
+            lap=lap,
+            canales=canales_str,
+            crudo=True,
+            max_puntos=presupuesto_puntos(self.grafico.width()),
+        )
 
     def _dibujar_vuelta(self, datos: dict) -> None:
         t = datos.get("t", [])
@@ -608,18 +693,39 @@ class VistaReplay(VistaBase):
 
         if series:
             nombre_canal = next(iter(series))
-            valores = series[nombre_canal]
-            self.curva_limpia.setData(t, valores)
+            valores = list(series[nombre_canal])
+            crudo_valores = list((crudo or {}).get(nombre_canal, []))
+            longitud = min(
+                [len(t), len(valores)]
+                + ([len(crudo_valores)] if crudo_valores else [])
+            )
+            t_recorte = list(t)[:longitud]
+            valores = valores[:longitud]
+            crudo_valores = crudo_valores[:longitud]
 
-            if crudo and nombre_canal in crudo:
-                self.curva_cruda.setData(t, crudo[nombre_canal])
+            _, dibujadas, indices = reducir(
+                t_recorte,
+                {nombre_canal: valores},
+                presupuesto_puntos(self.grafico.width(), factor=2),
+            )
+            x_dibujado = [t_recorte[i] for i in indices]
+            self.curva_limpia.setData(x_dibujado, dibujadas[nombre_canal])
+
+            if crudo_valores:
+                self.curva_cruda.setData(
+                    x_dibujado, [crudo_valores[i] for i in indices]
+                )
             else:
                 self.curva_cruda.clear()
 
-            idx_outliers = outliers.get(nombre_canal, [])
-            if idx_outliers:
-                xs = [t[i] for i in idx_outliers if i < len(t)]
-                ys = [valores[i] for i in idx_outliers if i < len(valores)]
+            posiciones = {int(i): j for j, i in enumerate(indices)}
+            xs, ys = [], []
+            for i in outliers.get(nombre_canal, []):
+                j = posiciones.get(int(i))
+                if j is not None:
+                    xs.append(x_dibujado[j])
+                    ys.append(dibujadas[nombre_canal][j])
+            if xs:
                 self.puntos_outlier.setData(xs, ys)
             else:
                 self.puntos_outlier.clear()
@@ -629,16 +735,16 @@ class VistaReplay(VistaBase):
                 f"{etiqueta_canal(nombre_canal)} · {datos.get('sesion', '?')}"
             )
 
-        n_total = datos.get("n_total", 0)
-        n_invalidos = kpis.get("n_invalidos", 0)
+        # Las KPIs describen la vuelta completa, no los puntos dibujados.
+        total = int(datos.get("n_total") or kpis.get("n_vuelta") or 0)
+        n_invalidos = int(kpis.get("n_invalidos", 0))
         outliers_total = kpis.get("outliers_total", 0)
-        valido = datos.get("valido") or []
-        if valido:
+        if total:
+            validas = max(total - n_invalidos, 0)
+        else:
+            valido = datos.get("valido") or []
             total = len(valido)
             validas = sum(1 for v in valido if v)
-        else:
-            total = n_total
-            validas = max(total - n_invalidos, 0)
         calidad = (100.0 * validas / total) if total else 0.0
 
         self.lbl_muestras_validas.setText(str(validas))

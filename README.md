@@ -99,6 +99,7 @@ PROYECTO/
 │       ├── glosario.py       # definiciones de métricas para tooltips y guía
 │       ├── dialogo_ayuda.py  # «Guía rápida» no modal
 │       ├── cliente_api.py    # REST (httpx) + WS (QWebSocket) en hilos de fondo
+│       ├── reduccion.py      # presupuesto adaptativo + LTTB local para gráficas
 │       └── vistas/           # sesiones, telemetria, espectro, prediccion,
 │                             # laboratorio, robustez, replay, vivo
 ├── data/
@@ -276,8 +277,11 @@ ofrecen como señales porque son el eje temporal y el agrupador de vueltas. En
 **Replay** se pueden comparar varias señales de la misma vuelta con color estable
 según el orden elegido, atajos preparados, selección manual, normalización 0–1,
 eje de progreso, diferencia A − B, cursor con lectura de valores y botón de
-encuadre, sin perder el panel de detalle. Las tarjetas **Muestras válidas**,
-**Descartadas** y **Calidad (%)** resumen la calidad de la vuelta.
+encuadre, sin perder el panel de detalle. Las gráficas piden de 900 a 6000
+puntos según su ancho, cachean la vuelta y reducen con LTTB al hacer zoom:
+en el smoke real el payload baja de 94,0 KB a 19,3 KB para dos señales, sin
+tocar el backend. Las tarjetas **Muestras válidas**, **Descartadas** y
+**Calidad (%)** resumen la vuelta completa, no los puntos dibujados.
 
 El panel superior permite conectar/desconectar el WebSocket `/ws/telemetria`.
 En la pestaña **En vivo**, al iniciar una captura se abre automáticamente
@@ -293,7 +297,7 @@ En la pestaña **En vivo**, al iniciar una captura se abre automáticamente
 python -m pytest -q
 ```
 
-**163 tests** de Python en verde (incluidos 20 de humo de la GUI en modo `offscreen`).
+**170 tests** de Python en verde (incluidos 23 de humo de la GUI en modo `offscreen`).
 Cobertura por área:
 
 | Fichero | Qué cubre |
@@ -310,7 +314,8 @@ Cobertura por área:
 | `tests/test_motor_vivo.py` | Degradación desde grip auto-calibrado, predicción Kalman (agregada y **por rueda**) y logger CSV. |
 | `tests/test_vivo_api.py` | Endpoints `/api/vivo/*` y el WebSocket `/api/vivo/stream` (incluye detener bajo carga). |
 | `tests/test_coherencia_live_batch.py` | **D14**: la ruta en vivo (outliers causales + filtro + decimación) reproduce la señal del pipeline batch con correlación > 0.97. Incluye el reprocesado del **CSV crudo** del logger en batch (logger → batch, A1/C/D4). |
-| `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay (orden estable, normalización, progreso %, diferencia A − B, cursor y encuadre); también cubre la «Guía rápida», las tarjetas de calidad, las cabeceras claras de métricas y las etiquetas de bandas. |
+| `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay (orden estable, normalización, progreso %, diferencia A − B, cursor, encuadre, presupuesto adaptativo, zoom sin petición y caché); también cubre la «Guía rápida», las tarjetas de calidad, las cabeceras claras de métricas y las etiquetas de bandas. |
+| `tests/test_reduccion.py` | LTTB multicanal: conserva extremos y picos de cualquier señal, comparte índices entre series y respeta el presupuesto de puntos. |
 
 Latencia medida contra `uvicorn` real (caché caliente): REST ≈ 13 ms, Kalman por WS ≈ 3 ms,
 re-fit de Ridge por WS ≈ 16 ms.

@@ -8,6 +8,7 @@ GUI puede quedar "bonita pero vacia" sin que pytest se entere.
 from __future__ import annotations
 
 import os
+import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -19,6 +20,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QFrame, QLabel
 
 from telemetria.gui.cliente_api import ApiClient
+from telemetria.gui.reduccion import presupuesto_puntos
 from telemetria.gui.ventana_principal import VentanaPrincipal
 
 SESION = {
@@ -113,6 +115,32 @@ class ApiFalso(ApiClient):
 
     def cerrar(self) -> None:
         pass
+
+
+class ApiConCacheFalso(ApiClient):
+    """Cliente real con `_get` falso para comprobar la caché de vueltas."""
+
+    def __init__(self) -> None:
+        super().__init__(base_url="http://127.0.0.1:1")
+        self.peticiones = 0
+
+    def _get(self, path: str) -> dict:
+        self.peticiones += 1
+        return {
+            "t": [0.0, 1.0, 2.0],
+            "series": {"throttle": [0.0, 1.0, 0.5], "brake": [1.0, 0.0, 0.5]},
+        }
+
+    def cerrar(self) -> None:
+        pass
+
+
+def _esperar(qt_app, condicion, timeout_s: float = 5.0) -> None:
+    limite = time.perf_counter() + timeout_s
+    while time.perf_counter() < limite and not condicion():
+        qt_app.processEvents()
+        time.sleep(0.01)
+    assert condicion(), "la señal Qt no llegó a tiempo"
 
 
 @pytest.fixture(scope="module")
@@ -537,3 +565,66 @@ def test_espectro_etiqueta_las_bandas(ventana, api) -> None:
         "Media",
         "Alta",
     ]
+
+
+def test_replay_pide_puntos_segun_el_ancho_del_grafico(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(6)
+
+    assert api.kwargs["vuelta"]["max_puntos"] == presupuesto_puntos(
+        replay.grafico.width()
+    )
+    assert api.kwargs["vuelta_comparar"]["max_puntos"] == presupuesto_puntos(
+        replay.grafico_comparar.width()
+    )
+
+
+def test_replay_zoom_redibuja_sin_repetir_peticion(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(6)
+    peticiones = api.llamadas.count("vuelta_comparar")
+
+    n = 3000
+    api.vuelta_comparar_recibida.emit(
+        {
+            "lap": 1,
+            "t": [float(i) * 0.01 for i in range(n)],
+            "series": {
+                "throttle": [float(i % 100) for i in range(n)],
+                "brake": [float(100 - i % 100) for i in range(n)],
+            },
+        }
+    )
+    puntos_completos = len(replay._curvas_comparar["throttle"].getData()[0])
+    assert puntos_completos < n
+
+    replay.grafico_comparar.setXRange(0.0, 5.0)
+    puntos_zoom = len(replay._curvas_comparar["throttle"].getData()[0])
+    assert puntos_zoom < puntos_completos
+    assert api.llamadas.count("vuelta_comparar") == peticiones
+    assert "LTTB" in replay.lbl_puntos.text()
+
+
+def test_cliente_cachea_vuelta_y_limpia_al_cambiar_de_sesion(qt_app) -> None:
+    api = ApiConCacheFalso()
+    api._registrar_sesion({"id": "sim_test_99"})
+    recibidos: list[dict] = []
+    api.vuelta_comparar_recibida.connect(recibidos.append)
+
+    params = dict(lap=1, canales=["throttle", "brake"], crudo=False, max_puntos=900)
+    api.vuelta_comparar(**params)
+    _esperar(qt_app, lambda: len(recibidos) >= 1)
+    api.vuelta_comparar(**params)
+    _esperar(qt_app, lambda: len(recibidos) >= 2)
+
+    assert api.peticiones == 1
+    assert recibidos[0] == recibidos[1]
+
+    api._registrar_sesion({"id": "otra_sesion"})
+    api.vuelta_comparar(**params)
+    _esperar(qt_app, lambda: len(recibidos) >= 3)
+
+    assert api.peticiones == 2
+    api.cerrar()

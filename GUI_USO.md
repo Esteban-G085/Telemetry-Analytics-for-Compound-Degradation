@@ -100,7 +100,10 @@ La pestaña **Replay** tiene dos zonas:
    A − B** dibuja una curva punteada con la resta cuando hay exactamente dos
    señales marcadas, y **Ver toda la vuelta** vuelve a encuadrar el eje tras
    hacer zoom. Todas las señales comparten el mismo eje temporal y el cursor
-   sincronizado.
+   sincronizado. La GUI pide solo unos 2–3 puntos por píxel (900–6000 según el
+   ancho), guarda la vuelta en caché y vuelve a muestrear con LTTB al hacer zoom,
+   sin repetir la petición. La etiqueta **Puntos dibujados** indica cuántos se
+   muestran frente a cuántos se recibieron.
 2. **Detalle de una señal** (abajo). Muestra la señal original frente a la
    filtrada y los puntos descartados. Encima hay tres tarjetas: **Muestras
    válidas**, **Descartadas** y **Calidad (%)** (porcentaje de muestras marcadas
@@ -118,7 +121,8 @@ comparador no pisa el gráfico de detalle.
 | `etiquetas_canales.py` | Traduce las claves de la API a nombres legibles y oculta las columnas de contexto. |
 | `glosario.py` | Definiciones únicas de MAE, RMSE, SNR, outlier, PSD, bandas, α, Q/R, calidad, progreso, diferencia y cursor para tooltips y guía. |
 | `dialogo_ayuda.py` | «Guía rápida»: diálogo no modal con el paso a paso y el glosario. |
-| `cliente_api.py` | Cliente REST (httpx) + WebSocket (QWebSocket). Todas las peticiones van a un hilo de fondo para no congelar la ventana. |
+| `cliente_api.py` | Cliente REST (httpx) + WebSocket (QWebSocket). Todas las peticiones van a un hilo de fondo y las vueltas se cachean por sesión/vuelta/canales. |
+| `reduccion.py` | Presupuesto de puntos según el ancho del gráfico y LTTB multicanal local para el zoom. No toca las claves JSON del backend. |
 | `ventana_principal.py` | `QMainWindow`: barra de estado del backend, botón «Guía rápida», 8 pestañas y panel conectar/desconectar WebSocket. |
 | `vistas/vista_base.py` | Clase base de todas las pestañas; provee el bloque de ayuda superior (`agregar_ayuda()`). |
 | `vistas/v_sesiones.py` | Lista de sesiones (CSV), cargar sesión, ver sesión activa. |
@@ -127,7 +131,7 @@ comparador no pisa el gráfico de detalle.
 | `vistas/v_prediccion.py` | Predicción de degradación (Ridge + Kalman) con métricas. |
 | `vistas/v_laboratorio.py` | Parámetros Q/R de Kalman, gestión de configuración y features. El alpha de Ridge está en Predicción. |
 | `vistas/v_robustez.py` | MAE vs SNR y simulador de fallo de sensores. |
-| `vistas/v_replay.py` | Replay de una vuelta: comparador multi-señal con cursor, progreso %, diferencia A − B y encuadre; detalle crudo vs. limpio con outliers y KPIs. |
+| `vistas/v_replay.py` | Replay de una vuelta: comparador multi-señal con cursor, progreso %, diferencia A − B y encuadre; detalle crudo vs. limpio con outliers y KPIs. Ambos usan `max_puntos` adaptativo y LTTB local. |
 | `vistas/v_vivo.py` | Captura en vivo: iniciar/detener, estado, osciloscopio. |
 
 ## Pestañas disponibles
@@ -172,14 +176,22 @@ escritorio.
 .venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider
 ```
 
-**163 tests** en total, de los cuales **20** son de humo de la GUI en modo
+**170 tests** en total, de los cuales **23** son de humo de la GUI en modo
 `offscreen`. Comprueban que arranca sin sesión, que se refresca al cargar una,
 que las 8 pestañas tienen ayuda visible, que los selectores usan nombres
 amables y ocultan las columnas de contexto, y que el comparador de Replay
 dibuja varias señales (también normalizadas). También cubren la **Guía rápida**,
 las tarjetas de calidad de Replay, las cabeceras claras de métricas y las
 etiquetas de las bandas del espectro, además del orden estable de colores, el
-eje de progreso, la curva de diferencia, el cursor y el botón de encuadre.
+eje de progreso, la curva de diferencia, el cursor, el encuadre, el presupuesto
+adaptativo, el zoom sin nueva petición y la caché de vueltas. Otros 4 tests
+comprueban la reducción LTTB (picos compartidos y sin desalinear series).
+
+Medición con el smoke real (`sim_test_99.csv`, vuelta 1): el payload de
+`throttle + brake` baja de **94,0 KB / 5067 puntos** con el valor por defecto
+del backend a **19,3 KB / 1023 puntos** con el presupuesto adaptativo de la
+GUI. El zoom posterior solo recalcula puntos dibujados, sin volver a pedir la
+vuelta.
 
 ## Mejora opcional
 

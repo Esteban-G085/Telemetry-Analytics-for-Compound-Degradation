@@ -161,6 +161,11 @@ class ApiClient(QObject):
         self._cliente = httpx.Client(timeout=30.0)
         self._pool = QThreadPool.globalInstance()
 
+        # Caché local de vueltas: alternar normalización/progreso/diferencia no
+        # repite la petición HTTP. Se invalida al cambiar de sesión.
+        self._cache_vueltas: dict[tuple, dict] = {}
+        self._sesion_id: str | None = None
+
         # WebSocket de telemetria (sesiones grabadas)
         self._socket_telemetria = QWebSocket()
         self._socket_telemetria.connected.connect(self._on_conectado_telemetria)
@@ -178,6 +183,43 @@ class ApiClient(QObject):
         self._socket_vivo.textMessageReceived.connect(self._on_mensaje_vivo)
         self._socket_vivo.errorOccurred.connect(self._on_error_vivo)
         self._cerrado_vivo = False
+
+    # ------------------------------------------------------------- Caché local
+    def _registrar_sesion(self, datos: object) -> None:
+        """Recuerda la sesión activa y limpia la caché si ha cambiado."""
+        if not isinstance(datos, dict):
+            return
+        activa = datos.get("id") or datos.get("activa") or datos.get("nombre")
+        if activa is None and "activa" in datos:
+            activa = ""
+        identificador = str(activa) if activa else None
+        if identificador != self._sesion_id:
+            self._sesion_id = identificador
+            self._cache_vueltas.clear()
+
+    @staticmethod
+    def _clave_vuelta(
+        sesion: str | None,
+        lap: int,
+        canales: str | list[str] | tuple[str, ...] | None,
+        crudo: bool,
+        max_puntos: int,
+    ) -> tuple:
+        if canales is None:
+            lista: tuple[str, ...] = ()
+        elif isinstance(canales, str):
+            lista = tuple(c.strip() for c in canales.split(",") if c.strip())
+        else:
+            lista = tuple(canales)
+        return (sesion or "", int(lap), lista, bool(crudo), int(max_puntos))
+
+    def _vuelta_cacheada(self, clave: tuple, senal) -> bool:
+        """Emite la vuelta ya descargada; devuelve si hubo acierto."""
+        datos = self._cache_vueltas.get(clave)
+        if datos is None:
+            return False
+        senal.emit(datos)
+        return True
 
     # ------------------------------------------------------------------ REST utilitario
     def _get(self, path: str) -> object:
@@ -217,7 +259,9 @@ class ApiClient(QObject):
         self._ejecutar(self._get_sesiones, self.sesiones_recibidas, self.error_sesiones)
 
     def _get_sesiones(self) -> dict:
-        return self._get("/api/sesiones")
+        datos = self._get("/api/sesiones")
+        self._registrar_sesion(datos)
+        return datos
 
     def sesion_activa(self) -> None:
         """Consulta GET /api/sesiones/activa."""
@@ -228,13 +272,17 @@ class ApiClient(QObject):
         )
 
     def _get_sesion_activa(self) -> dict:
-        return self._get("/api/sesiones/activa")
+        datos = self._get("/api/sesiones/activa")
+        self._registrar_sesion(datos)
+        return datos
 
     def cargar_sesion(self, nombre: str) -> None:
         """POST /api/sesiones/cargar con {"nombre": nombre}."""
 
         def _post() -> dict:
-            return self._post("/api/sesiones/cargar", {"nombre": nombre})
+            datos = self._post("/api/sesiones/cargar", {"nombre": nombre})
+            self._registrar_sesion(datos)
+            return datos
 
         self._ejecutar(_post, self.sesion_activa_recibida, self.error_sesion_activa)
 
@@ -247,14 +295,21 @@ class ApiClient(QObject):
         return self._get("/api/telemetria/canales")
 
     def vuelta(self, lap: int, canales: str | None = None, crudo: bool = False, max_puntos: int = 20000) -> None:
-        """Consulta GET /api/telemetria/vuelta/{lap}."""
+        """Consulta GET /api/telemetria/vuelta/{lap} (con caché local)."""
+        clave = self._clave_vuelta(
+            self._sesion_id, lap, canales, crudo, max_puntos
+        )
+        if self._vuelta_cacheada(clave, self.vuelta_recibida):
+            return
 
         def _get() -> dict:
             params: dict = {"crudo": str(crudo).lower(), "max_puntos": max_puntos}
             if canales:
                 params["canales"] = canales
             qs = "&".join(f"{k}={v}" for k, v in params.items())
-            return self._get(f"/api/telemetria/vuelta/{lap}?{qs}")
+            datos = self._get(f"/api/telemetria/vuelta/{lap}?{qs}")
+            self._cache_vueltas[clave] = datos
+            return datos
 
         self._ejecutar(_get, self.vuelta_recibida, self.error_vuelta)
 
@@ -265,8 +320,11 @@ class ApiClient(QObject):
         crudo: bool = False,
         max_puntos: int = 20000,
     ) -> None:
-        """Consulta varias señales de una vuelta para el comparador."""
+        """Consulta varias señales de una vuelta para el comparador (caché local)."""
         lista = canales if isinstance(canales, str) else ",".join(canales)
+        clave = self._clave_vuelta(self._sesion_id, lap, canales, crudo, max_puntos)
+        if self._vuelta_cacheada(clave, self.vuelta_comparar_recibida):
+            return
 
         def _get() -> dict:
             params: dict = {
@@ -275,7 +333,9 @@ class ApiClient(QObject):
                 "max_puntos": max_puntos,
             }
             qs = "&".join(f"{k}={v}" for k, v in params.items())
-            return self._get(f"/api/telemetria/vuelta/{lap}?{qs}")
+            datos = self._get(f"/api/telemetria/vuelta/{lap}?{qs}")
+            self._cache_vueltas[clave] = datos
+            return datos
 
         self._ejecutar(
             _get, self.vuelta_comparar_recibida, self.error_vuelta_comparar
