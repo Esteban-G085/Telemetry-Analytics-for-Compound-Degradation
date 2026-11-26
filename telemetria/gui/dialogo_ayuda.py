@@ -65,8 +65,10 @@ class DialogoGuia(QDialog):
         <p>En <b>Replay</b> puedes juntar acelerador, freno u otras señales en
         el mismo eje de tiempo. Usa el atajo «Acelerador + freno», marca señales
         a mano y activa <b>Normalizar</b> si quieres comparar su forma aunque
-        tengan unidades distintas. La zona inferior muestra el detalle de una
-        sola señal.</p>
+        tengan unidades distintas. Debajo de cada gráfica hay un <b>minimapa</b>
+        con la vuelta completa: la franja sombreada marca el <b>rango visible</b>
+        y la etiqueta lo dice en segundos o en porcentaje. La zona inferior
+        muestra el detalle de una sola señal.</p>
 
         <h3>Glosario</h3>
         <table border='0' cellpadding='4'>

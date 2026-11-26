@@ -89,6 +89,21 @@ GLOSARIO: dict[str, str] = {
         "Ver toda la vuelta: vuelve a ajustar el eje horizontal al rango "
         "completo de la vuelta cargada."
     ),
+    "rango": (
+        "Rango visible: trozo de la vuelta que se está viendo ahora. La "
+        "etiqueta lo muestra en segundos o en porcentaje y el minimapa lo "
+        "resalta sombreado."
+    ),
+    "minimapa": (
+        "Minimapa: visión completa de la vuelta debajo de la gráfica. La zona "
+        "sombreada es lo que ves arriba; arrástrala para desplazarte sin "
+        "perder la referencia."
+    ),
+    "unidades": (
+        "Unidades del eje Y: la magnitud real de cada señal (km/h, °C, N, psi "
+        "o mando). Al normalizar, el eje pasa a 0–1 y la leyenda y el cursor "
+        "recuerdan el valor original."
+    ),
 }
 
 # (nombre visible, clave en GLOSARIO) para la guía rápida.
@@ -110,6 +125,8 @@ TERMINOS: tuple[tuple[str, str], ...] = (
     ("Progreso de vuelta", "progreso"),
     ("Diferencia A − B", "diferencia"),
     ("Cursor", "cursor"),
+    ("Rango visible y minimapa", "rango"),
+    ("Unidades", "unidades"),
 )
 
 

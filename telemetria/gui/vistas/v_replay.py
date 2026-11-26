@@ -31,8 +31,10 @@ from telemetria.gui.etiquetas_canales import (
     descripcion_canal,
     etiqueta_canal,
     filtrar_canales,
+    unidad_canal,
 )
 from telemetria.gui.glosario import tooltip
+from telemetria.gui.graficas import ContextoZoom
 from telemetria.gui.paleta import (
     BORDE_SUAVE,
     PAPEL,
@@ -118,8 +120,12 @@ class VistaReplay(VistaBase):
             "acelerador, freno u otras señales en el mismo eje: mueve el ratón "
             "para leer sus valores, cambia a <b>Progreso de vuelta</b> si "
             "quieres comparar por recorrido, o activa <b>Diferencia A − B</b> "
-            "con dos señales. <b>Detalle de una señal</b> muestra la original "
-            "frente a la filtrada; el amarillo marca valores descartados."
+            "con dos señales. El <b>minimapa</b> de debajo muestra siempre la "
+            "vuelta completa y resalta el trozo que estás viendo: si haces "
+            "zoom o mueves la región, sabrás dónde estás. <b>Detalle de una "
+            "señal</b> muestra la original frente a la filtrada; el amarillo "
+            "marca valores descartados. Los ejes indican la magnitud y su "
+            "unidad (o 0–1 si normalizas)."
         )
 
         grp_controles = QGroupBox("Vuelta y señal")
@@ -195,7 +201,7 @@ class VistaReplay(VistaBase):
 
         self.grafico_comparar = pg.PlotWidget()
         self.grafico_comparar.setLabel("left", "Valor")
-        self.grafico_comparar.setLabel("bottom", "Tiempo (s)")
+        self.grafico_comparar.setLabel("bottom", "Tiempo de vuelta (s)")
         self.grafico_comparar.showGrid(x=True, y=True)
         self.grafico_comparar.setTitle("Comparador (elige señales)")
         self._leyenda_comparar = self.grafico_comparar.addLegend()
@@ -207,13 +213,20 @@ class VistaReplay(VistaBase):
         self.lbl_puntos.setToolTip(tooltip("downsample"))
         lay_c.addWidget(self.lbl_puntos)
 
+        self.contexto_comparar = ContextoZoom(
+            self.grafico_comparar,
+            rotulo="Viendo",
+            on_ver_todo=self._encuadrar_comparacion,
+        )
+        lay_c.addWidget(self.contexto_comparar)
+
         grp_comparar.setLayout(lay_c)
         layout.addWidget(grp_comparar, stretch=1)
 
         # --- Detalle de una señal (comportamiento anterior) ---
         self.grafico = pg.PlotWidget()
         self.grafico.setLabel("left", "Valor")
-        self.grafico.setLabel("bottom", "Tiempo (s)")
+        self.grafico.setLabel("bottom", "Tiempo de vuelta (s)")
         self.grafico.showGrid(x=True, y=True)
         self.grafico.setTitle("Detalle (sin datos)")
 
@@ -233,6 +246,8 @@ class VistaReplay(VistaBase):
         grp_grafico = QGroupBox("Detalle de una señal")
         lay_g = QVBoxLayout()
         lay_g.addWidget(self.grafico)
+        self.contexto_detalle = ContextoZoom(self.grafico, rotulo="Viendo")
+        lay_g.addWidget(self.contexto_detalle)
         grp_grafico.setLayout(lay_g)
         layout.addWidget(grp_grafico, stretch=1)
 
@@ -268,6 +283,7 @@ class VistaReplay(VistaBase):
         self.combo_preset.currentTextChanged.connect(self._aplicar_preset)
         self.lista_comparar.itemChanged.connect(self._on_comparacion_cambiada)
         self.chk_normalizar.toggled.connect(self._cargar_comparacion)
+        self.chk_normalizar.toggled.connect(self._al_cambiar_normalizacion)
         self.chk_progreso.toggled.connect(self._actualizar_eje_comparacion)
         self.chk_diferencia.toggled.connect(self._actualizar_diferencia)
         self.btn_encuadrar.clicked.connect(self._encuadrar_comparacion)
@@ -381,6 +397,21 @@ class VistaReplay(VistaBase):
             max_puntos=presupuesto_puntos(self.grafico_comparar.width()),
         )
 
+    @staticmethod
+    def _etiqueta_y(canales: list[str], normalizar: bool) -> str:
+        if normalizar:
+            return "Valor normalizado (0–1)"
+        unidades = []
+        for canal in canales:
+            unidad = unidad_canal(canal)
+            if unidad and unidad not in unidades:
+                unidades.append(unidad)
+        if not unidades:
+            return "Valor (sin unidad declarada)"
+        if len(unidades) == 1:
+            return f"Valor ({unidades[0]})"
+        return "Valor (" + ", ".join(unidades) + ") · normaliza para comparar"
+
     def _limpiar_comparacion(self) -> None:
         for curva in list(self._curvas_comparar.values()):
             if self._leyenda_comparar is not None:
@@ -396,6 +427,8 @@ class VistaReplay(VistaBase):
         self._y_dibujado = {}
         if hasattr(self, "lbl_puntos"):
             self.lbl_puntos.setText("Puntos dibujados: —")
+        if hasattr(self, "contexto_comparar"):
+            self.contexto_comparar.establecer_datos([], [])
         self._actualizar_diferencia()
         self._ocultar_cursor()
 
@@ -499,10 +532,21 @@ class VistaReplay(VistaBase):
         finally:
             self._redibujando = False
 
+    def _al_cambiar_normalizacion(self, _marcado=None) -> None:
+        """La etiqueta cambia al instante; los datos se recargan aparte."""
+        self.grafico_comparar.setLabel(
+            "left",
+            self._etiqueta_y(
+                list(self._series_comparar), self.chk_normalizar.isChecked()
+            ),
+        )
+
     def _actualizar_eje_comparacion(self) -> None:
         self.grafico_comparar.setLabel(
             "bottom",
-            "Progreso de vuelta (%)" if self.chk_progreso.isChecked() else "Tiempo (s)",
+            "Progreso de vuelta (%)"
+            if self.chk_progreso.isChecked()
+            else "Tiempo de vuelta (s)",
         )
         if not self._series_comparar:
             return
@@ -512,6 +556,15 @@ class VistaReplay(VistaBase):
             min(self._x_comparar_visible),
             max(self._x_comparar_visible),
             padding=0.02,
+        )
+        canales = list(self._series_comparar)
+        self.contexto_comparar.establecer_datos(
+            self._x_comparar_visible,
+            self._y_comparar_visible.get(canales[0], []) if canales else [],
+            unidad="%" if self.chk_progreso.isChecked() else "s",
+        )
+        self.grafico_comparar.setLabel(
+            "left", self._etiqueta_y(canales, self.chk_normalizar.isChecked())
         )
         self._redibujar_curvas_comparar()
 
@@ -646,11 +699,13 @@ class VistaReplay(VistaBase):
             self._curvas_comparar[canal] = curva
 
         self.grafico_comparar.setLabel(
-            "left", "Valor (0–1)" if normalizar else "Valor"
+            "left", self._etiqueta_y(canales, normalizar)
         )
         self.grafico_comparar.setLabel(
             "bottom",
-            "Progreso de vuelta (%)" if self.chk_progreso.isChecked() else "Tiempo (s)",
+            "Progreso de vuelta (%)"
+            if self.chk_progreso.isChecked()
+            else "Tiempo de vuelta (s)",
         )
         self.grafico_comparar.setTitle(
             f"Vuelta {datos.get('lap', '?')} · {len(canales)} señales"
@@ -659,6 +714,11 @@ class VistaReplay(VistaBase):
             min(self._x_comparar_visible),
             max(self._x_comparar_visible),
             padding=0.02,
+        )
+        self.contexto_comparar.establecer_datos(
+            self._x_comparar_visible,
+            self._y_comparar_visible.get(canales[0], []),
+            unidad="%" if self.chk_progreso.isChecked() else "s",
         )
         self._redibujar_curvas_comparar()
 
@@ -683,6 +743,9 @@ class VistaReplay(VistaBase):
             crudo=True,
             max_puntos=presupuesto_puntos(self.grafico.width()),
         )
+
+    def _actualizar_eje_detalle(self, canal: str) -> None:
+        self.grafico.setLabel("left", f"Valor ({unidad_canal(canal)})")
 
     def _dibujar_vuelta(self, datos: dict) -> None:
         t = datos.get("t", [])
@@ -734,6 +797,12 @@ class VistaReplay(VistaBase):
                 f"Vuelta {datos.get('lap', '?')} · "
                 f"{etiqueta_canal(nombre_canal)} · {datos.get('sesion', '?')}"
             )
+            self._actualizar_eje_detalle(nombre_canal)
+            self.contexto_detalle.establecer_datos(
+                x_dibujado, dibujadas[nombre_canal], unidad="s"
+            )
+        else:
+            self.contexto_detalle.establecer_datos([], [])
 
         # Las KPIs describen la vuelta completa, no los puntos dibujados.
         total = int(datos.get("n_total") or kpis.get("n_vuelta") or 0)
@@ -769,5 +838,6 @@ class VistaReplay(VistaBase):
         self.grafico.setTitle(error_amigable(mensaje))
         self.curva_limpia.clear()
         self.curva_cruda.clear()
+        self.contexto_detalle.establecer_datos([], [])
         self._limpiar_tarjetas()
         self.lbl_kpis.setText(error_amigable(mensaje))

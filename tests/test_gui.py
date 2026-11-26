@@ -495,7 +495,16 @@ def test_guia_rapida_se_abre_y_explica_metricas(ventana) -> None:
     assert dialogo is not None
     assert dialogo.isVisible()
     texto = dialogo.contenido.toPlainText()
-    for esperado in ("MAE", "RMSE", "Replay", "Glosario", "Sesiones"):
+    for esperado in (
+        "MAE",
+        "RMSE",
+        "Replay",
+        "Glosario",
+        "Sesiones",
+        "minimapa",
+        "Rango visible",
+        "Unidades",
+    ):
         assert esperado in texto
     dialogo.close()
 
@@ -605,6 +614,85 @@ def test_replay_zoom_redibuja_sin_repetir_peticion(ventana, api) -> None:
     assert puntos_zoom < puntos_completos
     assert api.llamadas.count("vuelta_comparar") == peticiones
     assert "LTTB" in replay.lbl_puntos.text()
+
+
+def test_replay_muestra_rango_visible_y_minimapa(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(6)
+
+    n = 3000
+    api.vuelta_comparar_recibida.emit(
+        {
+            "lap": 1,
+            "t": [float(i) for i in range(n)],
+            "series": {
+                "throttle": [float(i % 100) for i in range(n)],
+                "brake": [float(100 - i % 100) for i in range(n)],
+            },
+        }
+    )
+
+    contexto = replay.contexto_comparar
+    assert contexto.minimapa.scene() is not None
+    assert "Viendo:" in contexto.lbl_rango.text()
+    assert "minimapa" in contexto.minimapa.toolTip().lower() or contexto.minimapa.toolTip()
+    assert "Viendo:" in contexto.lbl_rango.text()
+    assert "0.0–2999.0 s" in contexto.lbl_rango.text()
+    assert "100 %" in contexto.lbl_rango.text()
+    assert "s" in contexto.lbl_rango.toolTip() or contexto.lbl_rango.toolTip()
+
+    replay.grafico_comparar.setXRange(1000.0, 1500.0, padding=0)
+    assert "1000.0–1500.0 s" in contexto.lbl_rango.text()
+    assert "17 %" in contexto.lbl_rango.text()
+    inicio, fin = contexto._region.getRegion()
+    assert 990 <= inicio <= 1010
+    assert 1490 <= fin <= 1510
+
+    contexto._region.setRegion((2000.0, 2500.0))
+    vista = replay.grafico_comparar.plotItem.vb.viewRange()[0]
+    assert 1990 <= vista[0] <= 2010
+    assert 2490 <= vista[1] <= 2510
+
+    contexto.btn_ver_todo.click()
+    vista = replay.grafico_comparar.plotItem.vb.viewRange()[0]
+    assert 3050 <= vista[1] <= 3070
+    assert "Tiempo de vuelta (s)" in replay.grafico_comparar.getAxis("bottom").labelText
+
+
+def test_replay_etiqueta_ejes_con_unidades(ventana, api) -> None:
+    api.sesion_activa_recibida.emit(SESION)
+    api.canales_recibidos.emit({"canales": CANALES})
+    replay = ventana.pestanas.widget(6)
+
+    api.vuelta_recibida.emit(
+        {
+            "lap": 1,
+            "t": [0.0, 1.0, 2.0],
+            "series": {"speed_kmh": [10.0, 20.0, 30.0]},
+        }
+    )
+    assert "km/h" in replay.grafico.getAxis("left").labelText
+    assert "s" in replay.contexto_detalle.lbl_rango.text()
+    replay.contexto_detalle.btn_ver_todo.click()
+    assert "0.0–2.0 s" in replay.contexto_detalle.lbl_rango.text()
+
+    api.vuelta_comparar_recibida.emit(
+        {
+            "lap": 1,
+            "t": [0.0, 1.0, 2.0],
+            "series": {"throttle": [10.0, 20.0, 30.0]},
+        }
+    )
+    assert "mando" in replay.grafico_comparar.getAxis("left").labelText
+
+    replay.chk_normalizar.setChecked(True)
+    assert "normalizado" in replay.grafico_comparar.getAxis("left").labelText
+    assert "10.00" in replay._nombre_serie("throttle", True)
+
+    replay.chk_progreso.setChecked(True)
+    assert "Progreso de vuelta (%)" in replay.grafico_comparar.getAxis("bottom").labelText
+    assert "%" in replay.contexto_comparar.lbl_rango.text()
 
 
 def test_cliente_cachea_vuelta_y_limpia_al_cambiar_de_sesion(qt_app) -> None:

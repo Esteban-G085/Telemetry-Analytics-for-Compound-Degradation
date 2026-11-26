@@ -100,6 +100,7 @@ PROYECTO/
 │       ├── dialogo_ayuda.py  # «Guía rápida» no modal
 │       ├── cliente_api.py    # REST (httpx) + WS (QWebSocket) en hilos de fondo
 │       ├── reduccion.py      # presupuesto adaptativo + LTTB local para gráficas
+│       ├── graficas.py       # minimapa, rango visible y botón de encuadre
 │       └── vistas/           # sesiones, telemetria, espectro, prediccion,
 │                             # laboratorio, robustez, replay, vivo
 ├── data/
@@ -264,20 +265,21 @@ Antes de cargar una sesión muestran «Sin sesión activa» en lugar de errores 
 | 4 | **Predicción** | Verdad/proxy, Ridge y Kalman por vuelta, tabla de error medio (MAE) y error grande (RMSE), con α y Q/R explicados. |
 | 5 | **Laboratorio** | Q/R de Kalman, configuración activa y features; guardar/restablecer config. |
 | 6 | **Robustez** | Error frente al ruido (SNR), error sin fallos y subida del error ↑ al desconectar sensores. |
-| 7 | **Replay** | Comparador de varias señales de una vuelta (cursor, progreso %, diferencia A − B) + detalle crudo/limpio, outliers y tarjetas de calidad. |
+| 7 | **Replay** | Comparador de varias señales de una vuelta (cursor, progreso %, diferencia A − B, minimapa y ejes con unidades) + detalle crudo/limpio, outliers y tarjetas de calidad. |
 | 8 | **En vivo** | Captura AC/modo seco, estado del motor y osciloscopio del WS de vivo. |
 
 Cada pestaña lleva arriba un bloque «Qué estás viendo» siempre visible. El botón
 **Guía rápida** de la barra superior abre un diálogo no modal con el flujo básico
 y un glosario de MAE, RMSE, SNR, outlier, PSD, Welch, bandas, α, Q/R, verdad/proxy
-y calidad, progreso, diferencia y cursor; los mismos textos aparecen en los
+y calidad, progreso, diferencia, cursor, rango visible y unidades; los mismos textos aparecen en los
 tooltips. Los selectores muestran nombres como «Acelerador» o «Deslizamiento FL
 (delantera izquierda)» en lugar de claves internas; `timestamp_s` y `lap` no se
 ofrecen como señales porque son el eje temporal y el agrupador de vueltas. En
 **Replay** se pueden comparar varias señales de la misma vuelta con color estable
 según el orden elegido, atajos preparados, selección manual, normalización 0–1,
-eje de progreso, diferencia A − B, cursor con lectura de valores y botón de
-encuadre, sin perder el panel de detalle. Las gráficas piden de 900 a 6000
+eje de progreso, diferencia A − B, cursor con lectura de valores, minimapa con
+el rango visible y botón de encuadre, sin perder el panel de detalle. Los ejes
+Y muestran la unidad real de cada señal (o 0–1 al normalizar). Las gráficas piden de 900 a 6000
 puntos según su ancho, cachean la vuelta y reducen con LTTB al hacer zoom:
 en el smoke real el payload baja de 94,0 KB a 19,3 KB para dos señales, sin
 tocar el backend. Las tarjetas **Muestras válidas**, **Descartadas** y
@@ -297,7 +299,7 @@ En la pestaña **En vivo**, al iniciar una captura se abre automáticamente
 python -m pytest -q
 ```
 
-**170 tests** de Python en verde (incluidos 23 de humo de la GUI en modo `offscreen`).
+**172 tests** de Python en verde (incluidos 25 de humo de la GUI en modo `offscreen`).
 Cobertura por área:
 
 | Fichero | Qué cubre |
@@ -314,7 +316,7 @@ Cobertura por área:
 | `tests/test_motor_vivo.py` | Degradación desde grip auto-calibrado, predicción Kalman (agregada y **por rueda**) y logger CSV. |
 | `tests/test_vivo_api.py` | Endpoints `/api/vivo/*` y el WebSocket `/api/vivo/stream` (incluye detener bajo carga). |
 | `tests/test_coherencia_live_batch.py` | **D14**: la ruta en vivo (outliers causales + filtro + decimación) reproduce la señal del pipeline batch con correlación > 0.97. Incluye el reprocesado del **CSV crudo** del logger en batch (logger → batch, A1/C/D4). |
-| `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay (orden estable, normalización, progreso %, diferencia A − B, cursor, encuadre, presupuesto adaptativo, zoom sin petición y caché); también cubre la «Guía rápida», las tarjetas de calidad, las cabeceras claras de métricas y las etiquetas de bandas. |
+| `tests/test_gui.py` | GUI PySide6 sin red: arranca sin sesión, se refresca al cargarla, usa nombres amables, ayuda visible y un comparador multi-señal en Replay (orden estable, normalización, progreso %, diferencia A − B, cursor, encuadre, minimapa, rango visible, unidades de ejes, presupuesto adaptativo, zoom sin petición y caché); también cubre la «Guía rápida», las tarjetas de calidad, las cabeceras claras de métricas y las etiquetas de bandas. |
 | `tests/test_reduccion.py` | LTTB multicanal: conserva extremos y picos de cualquier señal, comparte índices entre series y respeta el presupuesto de puntos. |
 
 Latencia medida contra `uvicorn` real (caché caliente): REST ≈ 13 ms, Kalman por WS ≈ 3 ms,
@@ -440,9 +442,10 @@ El backend, la GUI de escritorio y el lanzador están completos:
 - [x] **GUI** (`telemetria/gui/`, PySide6 + pyqtgraph): las **ocho pestañas** —
       1 sesiones, 2 telemetría, 3 espectro, 4 predicción, 5 laboratorio,
       6 robustez, 7 replay, 8 en vivo. Con ayuda siempre visible, nombres
-      legibles para las señales, comparador multi-señal en Replay, botón
-      **Guía rápida** no modal con glosario, tarjetas de calidad y métricas con
-      nombres autoexplicativos (bandas etiquetadas incluidas).
+      legibles para las señales, comparador multi-señal en Replay con minimapa
+      y ejes con unidades, botón **Guía rápida** no modal con glosario,
+      tarjetas de calidad y métricas con nombres autoexplicativos (bandas
+      etiquetadas incluidas).
 - [x] **App local** (`python -m telemetria` + `ejecutar_app.bat`) que abre la
       ventana nativa. No se necesita Node ni navegador.
 - [x] **Streaming** servidor→cliente: implementado en la Etapa 3

@@ -80,10 +80,18 @@ no hay textos blancos sobre fondos claros.
   En Replay, cada señal del comparador tiene un color fijo y distinto, asignado
   en el orden en que la marcaste (no por orden alfabético de la API).
 - **Eje y cursor.** En el comparador de Replay puedes alternar entre
-  **Tiempo (s)** y **Progreso de vuelta (%)**. Al mover el ratón sobre la
-  gráfica aparece un cursor con el instante y el valor de cada señal; si está
-  activada la normalización, el cursor muestra también el valor original y el
-  normalizado. **Ver toda la vuelta** restaura el zoom al rango completo.
+  **Tiempo de vuelta (s)** y **Progreso de vuelta (%)**. El eje Y dice la
+  magnitud y su unidad (km/h, °C, N, psi o «mando»); al normalizar pasa a
+  **Valor normalizado (0–1)** y la leyenda y el cursor recuerdan el valor
+  original. Al mover el ratón sobre la gráfica aparece un cursor con el
+  instante y el valor de cada señal. **Ver toda la vuelta** restaura el zoom
+  al rango completo.
+- **Contexto al hacer zoom.** Bajo cada gráfica de Replay hay un **minimapa**
+  con la vuelta completa. La franja sombreada es el **rango visible**, que
+  también se escribe con números: «Viendo 1000.0–1500.0 s de 0.0–2999.0 s
+  (17 %)». Puedes arrastrar la franja para moverte por la vuelta sin perder la
+  referencia. El botón **Ver toda la vuelta** está tanto en el comparador como
+  en el detalle.
 
 ## Comparar señales en Replay
 
@@ -103,7 +111,8 @@ La pestaña **Replay** tiene dos zonas:
    sincronizado. La GUI pide solo unos 2–3 puntos por píxel (900–6000 según el
    ancho), guarda la vuelta en caché y vuelve a muestrear con LTTB al hacer zoom,
    sin repetir la petición. La etiqueta **Puntos dibujados** indica cuántos se
-   muestran frente a cuántos se recibieron.
+   muestran frente a cuántos se recibieron. El **minimapa** y la etiqueta
+   «Viendo …» señalan la parte de la vuelta que estás inspeccionando.
 2. **Detalle de una señal** (abajo). Muestra la señal original frente a la
    filtrada y los puntos descartados. Encima hay tres tarjetas: **Muestras
    válidas**, **Descartadas** y **Calidad (%)** (porcentaje de muestras marcadas
@@ -123,6 +132,7 @@ comparador no pisa el gráfico de detalle.
 | `dialogo_ayuda.py` | «Guía rápida»: diálogo no modal con el paso a paso y el glosario. |
 | `cliente_api.py` | Cliente REST (httpx) + WebSocket (QWebSocket). Todas las peticiones van a un hilo de fondo y las vueltas se cachean por sesión/vuelta/canales. |
 | `reduccion.py` | Presupuesto de puntos según el ancho del gráfico y LTTB multicanal local para el zoom. No toca las claves JSON del backend. |
+| `graficas.py` | Contexto de zoom: minimapa de la vuelta completa, región visible sincronizada y etiqueta «Viendo …» con rango y unidad. |
 | `ventana_principal.py` | `QMainWindow`: barra de estado del backend, botón «Guía rápida», 8 pestañas y panel conectar/desconectar WebSocket. |
 | `vistas/vista_base.py` | Clase base de todas las pestañas; provee el bloque de ayuda superior (`agregar_ayuda()`). |
 | `vistas/v_sesiones.py` | Lista de sesiones (CSV), cargar sesión, ver sesión activa. |
@@ -131,7 +141,7 @@ comparador no pisa el gráfico de detalle.
 | `vistas/v_prediccion.py` | Predicción de degradación (Ridge + Kalman) con métricas. |
 | `vistas/v_laboratorio.py` | Parámetros Q/R de Kalman, gestión de configuración y features. El alpha de Ridge está en Predicción. |
 | `vistas/v_robustez.py` | MAE vs SNR y simulador de fallo de sensores. |
-| `vistas/v_replay.py` | Replay de una vuelta: comparador multi-señal con cursor, progreso %, diferencia A − B y encuadre; detalle crudo vs. limpio con outliers y KPIs. Ambos usan `max_puntos` adaptativo y LTTB local. |
+| `vistas/v_replay.py` | Replay de una vuelta: comparador multi-señal con cursor, progreso %, diferencia A − B, minimapa/rango visible y ejes con unidades; detalle crudo vs. limpio con outliers y KPIs. Ambos usan `max_puntos` adaptativo y LTTB local. |
 | `vistas/v_vivo.py` | Captura en vivo: iniciar/detener, estado, osciloscopio. |
 
 ## Pestañas disponibles
@@ -176,7 +186,7 @@ escritorio.
 .venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider
 ```
 
-**170 tests** en total, de los cuales **23** son de humo de la GUI en modo
+**172 tests** en total, de los cuales **25** son de humo de la GUI en modo
 `offscreen`. Comprueban que arranca sin sesión, que se refresca al cargar una,
 que las 8 pestañas tienen ayuda visible, que los selectores usan nombres
 amables y ocultan las columnas de contexto, y que el comparador de Replay
@@ -184,7 +194,8 @@ dibuja varias señales (también normalizadas). También cubren la **Guía rápi
 las tarjetas de calidad de Replay, las cabeceras claras de métricas y las
 etiquetas de las bandas del espectro, además del orden estable de colores, el
 eje de progreso, la curva de diferencia, el cursor, el encuadre, el presupuesto
-adaptativo, el zoom sin nueva petición y la caché de vueltas. Otros 4 tests
+adaptativo, el zoom sin nueva petición, la caché de vueltas, el minimapa, el
+rango visible y las unidades de los ejes. Otros 4 tests
 comprueban la reducción LTTB (picos compartidos y sin desalinear series).
 
 Medición con el smoke real (`sim_test_99.csv`, vuelta 1): el payload de

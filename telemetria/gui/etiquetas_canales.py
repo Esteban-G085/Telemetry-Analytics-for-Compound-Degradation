@@ -43,6 +43,16 @@ UNIDADES = {
     "pressure_psi": "psi",
 }
 
+# Entradas sin unidad física documentada. "mando" describe qué es el valor,
+# sin inventar una unidad: en los CSV de prueba hay fuera de rango (por ejemplo
+# throttle=-149), así que no afirmamos que sea siempre 0–1 ni un porcentaje.
+UNIDADES_TEXTO = {
+    "throttle": "mando",
+    "brake": "mando",
+    "steering": "mando",
+    "wheel_slip": "ratio",
+}
+
 
 def es_graficable(canal: str) -> bool:
     """¿Tiene sentido dibujar esta columna como una señal?"""
@@ -80,6 +90,20 @@ def etiqueta_canal(canal: str) -> str:
     return f"{nombre} ({unidad})" if unidad else nombre
 
 
+def unidad_canal(canal: str) -> str:
+    """Unidad que debe mostrarse en el eje Y de una señal."""
+    if canal in UNIDADES:
+        return UNIDADES[canal]
+
+    for prefijo, unidad in UNIDADES.items():
+        if canal.startswith(prefijo + "_") or canal == prefijo:
+            return unidad
+    for prefijo, unidad in UNIDADES_TEXTO.items():
+        if canal.startswith(prefijo + "_") or canal == prefijo:
+            return unidad
+    return ""
+
+
 def descripcion_canal(canal: str) -> str:
     """Texto más largo para tooltips."""
     if canal == "timestamp_s":
@@ -89,7 +113,11 @@ def descripcion_canal(canal: str) -> str:
 
     etiqueta = etiqueta_canal(canal)
     if canal in {"throttle", "brake", "steering"}:
-        return f"{etiqueta}: mando del piloto a lo largo de la vuelta."
+        return (
+            f"{etiqueta}: mando del piloto a lo largo de la vuelta. El valor "
+            "suele ir de 0 a 1; si el CSV trae picos fuera de ese rango se "
+            "conservan, no se recortan."
+        )
     if canal.startswith("wheel_slip"):
         return f"{etiqueta}: deslizamiento de la rueda; sube cuando pierde agarre."
     if canal.startswith("temp_core_c"):
